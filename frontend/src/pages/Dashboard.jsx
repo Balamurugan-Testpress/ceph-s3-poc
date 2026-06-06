@@ -5,6 +5,7 @@ import BucketExplorer from "../components/BucketExplorer";
 import AdminUsers from "../components/AdminUsers";
 import S3Actions from "../components/S3Actions";
 import QuotaUsage from "../components/QuotaUsage";
+import CredentialsPanel from "../components/CredentialsPanel";
 import "./Dashboard.css";
 
 function Dashboard() {
@@ -45,6 +46,13 @@ function Dashboard() {
           <section className="dashboard-section">
             <h2>My Storage</h2>
             <QuotaUsage />
+          </section>
+        )}
+
+        {!isAdmin && (
+          <section className="dashboard-section">
+            <h2>My Credentials</h2>
+            <CredentialsPanel />
           </section>
         )}
 

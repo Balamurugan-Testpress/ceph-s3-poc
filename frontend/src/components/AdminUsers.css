@@ -148,3 +148,13 @@
 .au-delete-btn:hover {
   background: #bb2d3b;
 }
+
+.au-synced {
+  color: #198754;
+  font-size: 0.85rem;
+}
+
+.au-unsynced {
+  color: #dc3545;
+  font-size: 0.85rem;
+}

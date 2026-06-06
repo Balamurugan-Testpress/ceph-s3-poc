@@ -52,6 +52,29 @@ function BucketExplorer() {
     setLoadingObjects(false);
   }
 
+  async function handleDelete(bucket, key) {
+    if (!confirm(`Delete "${key}"?`)) return;
+    try {
+      await apiFetch(`/api/rgw/buckets/${bucket}/objects/${encodeURI(key)}`, {
+        method: "DELETE",
+      });
+      setObjects((prev) => prev.filter((o) => o.key !== key));
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function handleDownload(bucket, key) {
+    try {
+      const data = await apiFetch(
+        `/api/rgw/buckets/${bucket}/objects/${encodeURI(key)}/download`
+      );
+      window.open(data.url, "_blank");
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
   if (loading) return <div className="be-loading">Loading buckets…</div>;
 
   return (
@@ -103,6 +126,7 @@ function BucketExplorer() {
                   <th>Key</th>
                   <th>Size</th>
                   <th>Last Modified</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -111,6 +135,22 @@ function BucketExplorer() {
                     <td className="be-key">{obj.key}</td>
                     <td>{formatBytes(obj.size)}</td>
                     <td>{obj.last_modified?.slice(0, 19)?.replace("T", " ")}</td>
+                    <td className="be-actions">
+                      <button
+                        className="be-act-btn be-dl"
+                        title="Download"
+                        onClick={() => handleDownload(selected, obj.key)}
+                      >
+                        ⬇
+                      </button>
+                      <button
+                        className="be-act-btn be-del"
+                        title="Delete"
+                        onClick={() => handleDelete(selected, obj.key)}
+                      >
+                        ✕
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

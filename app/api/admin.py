@@ -51,27 +51,29 @@ async def create_new_user(data: CreateUserRequest, db: AsyncSession = Depends(ge
             display_name=data.display_name or data.username,
         )
     except Exception as exc:
-        # RGW creation failed — still keep the DB user but with no RGW access
-        return UserCreatedResponse(
-            message=f"User created in DB but RGW provisioning failed: {exc}",
-            user=user,
+        # Atomic: RGW failed → roll back the DB user
+        await delete_user(db, user.id)
+        raise HTTPException(
+            status_code=502,
+            detail=f"RGW user creation failed — user rolled back: {exc}",
         )
 
     # 3. Extract keys and store them
     keys = extract_rgw_keys(rgw_resp)
-    if keys:
-        access_key, secret_key = keys
-        user = await update_rgw_creds(db, user.id, rgw_uid, access_key, secret_key)
-        return UserCreatedResponse(
-            message="User created with RGW credentials",
-            user=user,
-            rgw_access_key=access_key,
-            rgw_secret_key=secret_key,
+    if not keys:
+        await delete_user(db, user.id)
+        raise HTTPException(
+            status_code=502,
+            detail="RGW user created but no keys returned — user rolled back",
         )
 
+    access_key, secret_key = keys
+    user = await update_rgw_creds(db, user.id, rgw_uid, access_key, secret_key)
     return UserCreatedResponse(
-        message="RGW user created but no keys returned",
+        message="User created with RGW credentials",
         user=user,
+        rgw_access_key=access_key,
+        rgw_secret_key=secret_key,
     )
 
 

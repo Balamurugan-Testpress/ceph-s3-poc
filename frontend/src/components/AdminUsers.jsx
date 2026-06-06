@@ -125,10 +125,9 @@ function AdminUsers() {
             <tr>
               <th>Username</th>
               <th>Display Name</th>
-              <th>Role</th>
               <th>Quota</th>
               <th>Used</th>
-              <th>RGW</th>
+              <th>RGW Sync</th>
               <th>Created</th>
               <th></th>
             </tr>
@@ -138,10 +137,17 @@ function AdminUsers() {
               <tr key={u.id}>
                 <td>{u.username}</td>
                 <td>{u.display_name}</td>
-                <td>{u.role}</td>
                 <td>{formatBytes(u.quota_bytes)}</td>
                 <td>{formatBytes(u.used_bytes)}</td>
-                <td>{u.rgw_user_id ? "✓" : "—"}</td>
+                <td>
+                  {u.rgw_user_id ? (
+                    <span className="au-synced" title={`RGW user: ${u.rgw_user_id}`}>
+                      ✓ synced
+                    </span>
+                  ) : (
+                    <span className="au-unsynced">✗ not synced</span>
+                  )}
+                </td>
                 <td>{u.created_at?.slice(0, 10)}</td>
                 <td>
                   {u.role !== "admin" && (

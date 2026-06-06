@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.auth.jwt import create_access_token
 from app.db import get_db
 from app.db.schemas import LoginRequest, LoginResponse, UserOut
@@ -55,4 +57,20 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     return LoginResponse(
         access_token=token,
         user=user,
+    )
+
+
+class CredentialsOut(BaseModel):
+    access_key: str | None = None
+    secret_key: str | None = None
+
+
+@router.get("/credentials", response_model=CredentialsOut)
+async def get_credentials(current_user: dict = Depends(get_current_user)):
+    """Return the current user's RGW S3 credentials."""
+    if current_user["role"] == "admin":
+        return CredentialsOut()
+    return CredentialsOut(
+        access_key=current_user.get("rgw_access_key"),
+        secret_key=current_user.get("rgw_secret_key"),
     )

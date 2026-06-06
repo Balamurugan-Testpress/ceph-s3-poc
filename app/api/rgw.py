@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.services.rgw_client import RGWClient, RGWError
 from app.services.ceph_api import CephApiClient, CephApiError
 from app.services.rgw_client import RGWClient, RGWError
 
@@ -68,5 +69,33 @@ async def list_objects(
         if fetch_all:
             return client.list_all_objects(name)
         return client.list_objects(name, max_keys=max_keys, continuation_token=continuation_token)
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.delete("/buckets/{bucket}/objects/{key:path}")
+async def delete_object(
+    bucket: str,
+    key: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        client = _get_user_client(current_user)
+        return client.delete_object(bucket, key)
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/buckets/{bucket}/objects/{key:path}/download")
+async def download_object(
+    bucket: str,
+    key: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Get a presigned download URL valid for 1 hour."""
+    try:
+        client = _get_user_client(current_user)
+        url = client.presigned_url(bucket, key)
+        return {"url": url}
     except RGWError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

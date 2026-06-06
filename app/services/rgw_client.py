@@ -120,3 +120,23 @@ class RGWClient:
             return {"bucket": bucket, "key": key, "uploaded": True}
         except Exception as exc:
             raise RGWError(str(exc)) from exc
+
+    def delete_object(self, bucket: str, key: str) -> dict:
+        """Delete an object."""
+        try:
+            self._get_client().delete_object(Bucket=bucket, Key=key)
+            return {"bucket": bucket, "key": key, "deleted": True}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def presigned_url(self, bucket: str, key: str, expires_in: int = 3600) -> str:
+        """Generate a presigned download URL."""
+        try:
+            url = self._get_client().generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": key},
+                ExpiresIn=expires_in,
+            )
+            return url
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
