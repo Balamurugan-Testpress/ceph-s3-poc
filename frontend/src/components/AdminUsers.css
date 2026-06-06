@@ -193,3 +193,73 @@
   color: #dc3545;
   font-size: 0.85rem;
 }
+
+.au-quota-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.au-qe-btn {
+  padding: 0 0.25rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #888;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.au-qe-btn:hover {
+  color: #0d6efd;
+}
+
+.au-quota-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.au-quota-edit input {
+  width: 70px;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid #0d6efd;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.au-qe-unit {
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.au-qe-save {
+  padding: 0.15rem 0.4rem;
+  background: #198754;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.au-qe-save:hover {
+  background: #157347;
+}
+
+.au-qe-cancel {
+  padding: 0.15rem 0.4rem;
+  background: #dc3545;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.au-qe-cancel:hover {
+  background: #bb2d3b;
+}

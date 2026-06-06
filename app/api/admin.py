@@ -42,7 +42,7 @@ async def create_new_user(data: CreateUserRequest, db: AsyncSession = Depends(ge
         username=data.username,
         password=data.password,
         display_name=data.display_name,
-        quota_gb=data.quota_gb,
+        quota_mb=data.quota_mb,
     )
 
     try:
@@ -72,7 +72,7 @@ async def create_new_user(data: CreateUserRequest, db: AsyncSession = Depends(ge
     # 4. Set quota in Ceph (native S3-level enforcement)
     try:
         from app.services.rgw_admin import set_rgw_user_quota
-        await set_rgw_user_quota(rgw_uid, data.quota_gb * 1_073_741_824)
+        await set_rgw_user_quota(rgw_uid, data.quota_mb * 1_048_576)
     except Exception:
         pass  # non-critical — our app-level check still works
 
@@ -142,7 +142,7 @@ class BulkDeleteUsersRequest(BaseModel):
 
 
 class UpdateQuotaRequest(BaseModel):
-    quota_gb: int
+    quota_mb: int
 
 
 @router.post("/users/bulk-delete")
@@ -194,7 +194,7 @@ async def update_quota(
     user = await get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    user.quota_bytes = data.quota_gb * 1_073_741_824
+    user.quota_bytes = data.quota_mb * 1_048_576
     await db.commit()
 
     # Sync quota to Ceph (native S3-level enforcement)
@@ -205,4 +205,4 @@ async def update_quota(
         except Exception:
             pass  # non-critical
 
-    return {"message": f"Quota updated to {data.quota_gb} GB"}
+    return {"message": f"Quota updated to {data.quota_mb} MB"}

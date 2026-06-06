@@ -2,15 +2,23 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
 import "./AdminUsers.css";
 
+function formatBytes(bytes) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(1) + " " + units[i];
+}
+
 function AdminUsers() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ username: "", password: "", display_name: "", quota_gb: 1 });
+  const [form, setForm] = useState({ username: "", password: "", display_name: "", quota_mb: 100 });
   const [result, setResult] = useState(null);
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [editQuota, setEditQuota] = useState(null); // {id, username, value}
 
   const loadUsers = useCallback(async () => {
     try {
@@ -35,7 +43,7 @@ function AdminUsers() {
       });
       setResult({ success: true, data: resp });
       setShowForm(false);
-      setForm({ username: "", password: "", display_name: "", quota_gb: 1 });
+      setForm({ username: "", password: "", display_name: "", quota_mb: 100 });
       loadUsers();
     } catch (err) {
       setResult({ success: false, error: err.message });
@@ -91,11 +99,22 @@ function AdminUsers() {
     }
   }
 
-  function formatBytes(bytes) {
-    if (!bytes) return "0 B";
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return (bytes / Math.pow(1024, i)).toFixed(1) + " " + units[i];
+  function startEditQuota(user) {
+    setEditQuota({ id: user.id, username: user.username, value: Math.round(user.quota_bytes / 1_048_576) });
+  }
+
+  async function saveQuota() {
+    if (!editQuota || editQuota.value < 1) return;
+    try {
+      await apiFetch(`/api/admin/users/${editQuota.id}/quota`, {
+        method: "PATCH",
+        body: JSON.stringify({ quota_mb: editQuota.value }),
+      });
+      setEditQuota(null);
+      loadUsers();
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   return (
@@ -135,12 +154,12 @@ function AdminUsers() {
             onChange={(e) => setForm({ ...form, display_name: e.target.value })}
           />
           <div className="au-form-row">
-            <label>Quota (GB):</label>
+            <label>Quota (MB):</label>
             <input
               type="number"
               min="1"
-              value={form.quota_gb}
-              onChange={(e) => setForm({ ...form, quota_gb: parseInt(e.target.value) || 1 })}
+              value={form.quota_mb}
+              onChange={(e) => setForm({ ...form, quota_mb: parseInt(e.target.value) || 1 })}
             />
           </div>
           <button type="submit" disabled={creating}>
@@ -187,7 +206,27 @@ function AdminUsers() {
                 </td>
                 <td>{u.username}</td>
                 <td>{u.display_name}</td>
-                <td>{formatBytes(u.quota_bytes)}</td>
+                <td>
+                  {editQuota && editQuota.id === u.id ? (
+                    <span className="au-quota-edit">
+                      <input
+                        type="number"
+                        min="1"
+                        value={editQuota.value}
+                        onChange={(e) => setEditQuota({ ...editQuota, value: parseInt(e.target.value) || 1 })}
+                        autoFocus
+                      />
+                      <span className="au-qe-unit"> MB</span>
+                      <button className="au-qe-save" onClick={saveQuota}>✓</button>
+                      <button className="au-qe-cancel" onClick={() => setEditQuota(null)}>✕</button>
+                    </span>
+                  ) : (
+                    <span className="au-quota-display">
+                      {formatBytes(u.quota_bytes)}
+                      <button className="au-qe-btn" onClick={() => startEditQuota(u)} title="Edit quota">✎</button>
+                    </span>
+                  )}
+                </td>
                 <td>{formatBytes(u.used_bytes)}</td>
                 <td>
                   {u.rgw_user_id ? (

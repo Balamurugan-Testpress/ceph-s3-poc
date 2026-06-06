@@ -14,7 +14,7 @@ class CreateUserRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=100)
     password: str = Field(..., min_length=4, max_length=200)
     display_name: str = Field(default="", max_length=200)
-    quota_gb: int = Field(default=1, ge=1, le=99999)
+    quota_mb: int = Field(default=100, ge=1, le=999999)
 
 
 class CreateBucketRequest(BaseModel):
