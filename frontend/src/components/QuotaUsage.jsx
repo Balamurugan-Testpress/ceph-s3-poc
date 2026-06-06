@@ -15,15 +15,15 @@ function formatBytes(bytes) {
 function QuotaUsage() {
   const { user } = useAuth();
   const [used, setUsed] = useState(user?.used_bytes || 0);
+  const [quota, setQuota] = useState(user?.quota_bytes || 1);
   const [recalc, setRecalc] = useState(false);
   const [recalcMsg, setRecalcMsg] = useState(null);
-
-  const quota = user?.quota_bytes || 1;
 
   const refresh = useCallback(async () => {
     try {
       const data = await apiFetch("/api/s3/usage");
       setUsed(data.used_bytes || 0);
+      if (data.quota_bytes !== undefined) setQuota(data.quota_bytes);
     } catch (_) {}
   }, []);
 
@@ -42,6 +42,7 @@ function QuotaUsage() {
     try {
       const data = await apiFetch("/api/s3/recalculate-usage", { method: "POST" });
       setUsed(data.used_bytes);
+      if (data.quota_bytes !== undefined) setQuota(data.quota_bytes);
       setRecalcMsg(`Recalculated: ${formatBytes(data.used_bytes)} used`);
     } catch (err) {
       setRecalcMsg(`Error: ${err.message}`);
