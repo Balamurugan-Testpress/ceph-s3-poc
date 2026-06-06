@@ -2,6 +2,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import ClusterStatus from "../components/ClusterStatus";
 import BucketExplorer from "../components/BucketExplorer";
+import AdminUsers from "../components/AdminUsers";
+import S3Actions from "../components/S3Actions";
 import "./Dashboard.css";
 
 function Dashboard() {
@@ -12,6 +14,8 @@ function Dashboard() {
     logout();
     navigate("/login", { replace: true });
   }
+
+  const isAdmin = user?.role === "admin";
 
   return (
     <div className="dashboard">
@@ -34,9 +38,21 @@ function Dashboard() {
           <ClusterStatus />
         </section>
 
+        {isAdmin && (
+          <section className="dashboard-section">
+            <h2>User Management</h2>
+            <AdminUsers />
+          </section>
+        )}
+
         <section className="dashboard-section">
           <h2>Buckets &amp; Objects</h2>
           <BucketExplorer />
+        </section>
+
+        <section className="dashboard-section">
+          <h2>Actions</h2>
+          <S3Actions />
         </section>
       </main>
     </div>

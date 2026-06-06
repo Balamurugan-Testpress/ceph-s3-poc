@@ -1,19 +1,45 @@
-"""RGW S3 endpoints — list buckets and objects."""
+"""RGW S3 endpoints — list buckets and objects using the logged-in user's keys.
+
+Admin users use the env-var RGW_ACCESS_KEY / RGW_SECRET_KEY.
+Tenant users use their per-user RGW credentials stored in the DB.
+"""
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.deps import require_admin
+from app.api.deps import get_current_user
 from app.services.rgw_client import RGWClient, RGWError
 
 router = APIRouter(prefix="/rgw", tags=["rgw"])
 
+ADMIN_ID = "admin"
+
+
+def _get_user_client(current_user: dict) -> RGWClient:
+    """Build an RGWClient using the correct S3 keys for this user."""
+    ak = current_user.get("rgw_access_key")
+    sk = current_user.get("rgw_secret_key")
+
+    # Admin users don't have per-user keys — use env vars
+    if current_user["id"] == ADMIN_ID:
+        return RGWClient()
+
+    # Tenant users must have keys stored in DB
+    if not ak or not sk:
+        raise HTTPException(
+            status_code=403,
+            detail="This user has no RGW credentials. Contact an admin.",
+        )
+    return RGWClient(access_key=ak, secret_key=sk)
+
 
 @router.get("/buckets")
-async def list_buckets(admin: dict = Depends(require_admin)):
+async def list_buckets(current_user: dict = Depends(get_current_user)):
     try:
-        client = RGWClient()
+        client = _get_user_client(current_user)
         return {"buckets": client.list_buckets()}
     except RGWError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -25,10 +51,10 @@ async def list_objects(
     max_keys: int = 100,
     fetch_all: bool = False,
     continuation_token: str | None = None,
-    admin: dict = Depends(require_admin),
+    current_user: dict = Depends(get_current_user),
 ):
     try:
-        client = RGWClient()
+        client = _get_user_client(current_user)
         if fetch_all:
             return client.list_all_objects(name)
         return client.list_objects(name, max_keys=max_keys, continuation_token=continuation_token)

@@ -1,0 +1,150 @@
+.admin-users {
+  margin-top: 0.5rem;
+}
+
+.au-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.au-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #555;
+}
+
+.au-create-btn {
+  padding: 0.35rem 0.85rem;
+  background: #198754;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.au-create-btn:hover {
+  background: #157347;
+}
+
+.au-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.au-form input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.au-form-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.au-form-row label {
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.au-form-row input[type="number"] {
+  width: 80px;
+}
+
+.au-form button[type="submit"] {
+  padding: 0.4rem 1rem;
+  background: #0d6efd;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.au-form button[type="submit"]:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.au-error {
+  color: #dc3545;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  background: #f8d7da;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.au-keys-reveal {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.au-keys-reveal pre {
+  margin: 0.5rem 0 0 0;
+  font-family: monospace;
+  background: #fff;
+  padding: 0.5rem;
+  border-radius: 4px;
+  white-space: pre-wrap;
+}
+
+.au-loading,
+.au-empty {
+  color: #888;
+  font-style: italic;
+  padding: 1rem 0;
+  font-size: 0.9rem;
+}
+
+.au-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.au-table th {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 2px solid #dee2e6;
+  color: #555;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.au-table td {
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #eee;
+}
+
+.au-table tr:hover td {
+  background: #f8f9fa;
+}
+
+.au-delete-btn {
+  padding: 0.2rem 0.5rem;
+  background: #dc3545;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.au-delete-btn:hover {
+  background: #bb2d3b;
+}

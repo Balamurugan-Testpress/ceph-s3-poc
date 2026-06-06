@@ -1,4 +1,17 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: ceph-s3-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cephs3
+      POSTGRES_PASSWORD: cephs3
+      POSTGRES_DB: cephs3
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
   api:
     build: .
     container_name: ceph-s3-api
@@ -9,6 +22,8 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
+    depends_on:
+      - db
 
   frontend:
     build: ./frontend
@@ -21,3 +36,6 @@ services:
       - /app/node_modules
     depends_on:
       - api
+
+volumes:
+  pgdata:

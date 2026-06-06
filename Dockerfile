@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml .
 RUN pip install uv && uv pip install --system \
-    fastapi uvicorn pydantic python-dotenv httpx pyjwt boto3
+    fastapi uvicorn pydantic python-dotenv httpx pyjwt boto3 bcrypt sqlalchemy asyncpg python-multipart
 
 COPY . .
 

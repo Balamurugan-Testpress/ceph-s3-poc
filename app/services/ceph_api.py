@@ -95,6 +95,32 @@ class CephApiClient:
         return resp.json()
 
 
+    async def request(self, method: str, path: str, **kwargs) -> dict | list:
+        """Generic authenticated request to Ceph Dashboard API."""
+        await self._ensure_auth()
+        resp = await self._client.request(method, path, **kwargs)
+        if resp.status_code >= 400:
+            raise CephApiError(
+                f"{method} {path} failed (HTTP {resp.status_code}): {resp.text[:300]}"
+            )
+        return resp.json()
+
+    async def get(self, path: str, **kwargs) -> dict | list:
+        return await self.request("GET", path, **kwargs)
+
+    async def post(self, path: str, **kwargs) -> dict | list:
+        return await self.request("POST", path, **kwargs)
+
+    async def delete(self, path: str, **kwargs) -> dict | list:
+        return await self.request("DELETE", path, **kwargs)
+
+
     async def close(self) -> None:
         """Close the underlying HTTP client."""
         await self._client.aclose()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        await self.close()

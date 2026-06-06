@@ -1,3 +1,9 @@
+"""Minimal S3 client for listing buckets, objects, creating buckets, and uploading.
+
+Can work with either admin credentials (from env vars) or per-user credentials
+(passed at construction time).
+"""
+
 from __future__ import annotations
 
 import os
@@ -11,10 +17,20 @@ class RGWError(Exception):
 
 
 class RGWClient:
-    def __init__(self) -> None:
+    """S3 client that talks to Ceph RGW.
+
+    If *access_key* and *secret_key* are provided, they are used directly.
+    Otherwise falls back to ``RGW_ACCESS_KEY`` / ``RGW_SECRET_KEY`` env vars.
+    """
+
+    def __init__(
+        self,
+        access_key: str | None = None,
+        secret_key: str | None = None,
+    ) -> None:
         self.endpoint = os.getenv("RGW_ENDPOINT", "http://142.132.138.10:80")
-        self.access_key = os.getenv("RGW_ACCESS_KEY", "admin")
-        self.secret_key = os.getenv("RGW_SECRET_KEY", "admin123")
+        self.access_key = access_key or os.getenv("RGW_ACCESS_KEY", "admin")
+        self.secret_key = secret_key or os.getenv("RGW_SECRET_KEY", "admin123")
         self._client = None
 
     def _get_client(self):
@@ -26,11 +42,14 @@ class RGWClient:
             self._client = session.client(
                 "s3",
                 endpoint_url=self.endpoint,
-                config=Config(signature_version="s3v4", connect_timeout=5, read_timeout=10),
+                config=Config(signature_version="s3v4", connect_timeout=5, read_timeout=30),
             )
         return self._client
 
+    # ── Bucket listing ──
+
     def list_buckets(self) -> list[dict]:
+        """Return [{name, creation_date}], newest first."""
         resp = self._get_client().list_buckets()
         buckets = [
             {"name": b["Name"], "creation_date": str(b.get("CreationDate", ""))}
@@ -39,7 +58,20 @@ class RGWClient:
         buckets.sort(key=lambda x: x["creation_date"], reverse=True)
         return buckets
 
-    def list_objects(self, bucket: str, max_keys: int = 100, continuation_token: str | None = None) -> dict:
+    def create_bucket(self, name: str) -> dict:
+        """Create a new S3 bucket."""
+        try:
+            self._get_client().create_bucket(Bucket=name)
+            return {"name": name, "created": True}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    # ── Object operations ──
+
+    def list_objects(
+        self, bucket: str, max_keys: int = 100, continuation_token: str | None = None
+    ) -> dict:
+        """Return {objects: [{key, size, last_modified}], is_truncated, key_count, next_token}."""
         try:
             kwargs: dict = {"Bucket": bucket, "MaxKeys": max_keys}
             if continuation_token:
@@ -80,3 +112,11 @@ class RGWClient:
             "total_count": len(all_objects),
             "bucket": bucket,
         }
+
+    def upload_object(self, bucket: str, key: str, data: bytes) -> dict:
+        """Upload raw bytes as an object."""
+        try:
+            self._get_client().put_object(Bucket=bucket, Key=key, Body=data)
+            return {"bucket": bucket, "key": key, "uploaded": True}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
