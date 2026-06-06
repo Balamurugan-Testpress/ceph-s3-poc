@@ -1,0 +1,77 @@
+.cluster-status-loading,
+.cluster-status-error {
+  padding: 1rem;
+  color: #666;
+  font-style: italic;
+}
+
+.cluster-status-error {
+  color: #dc3545;
+}
+
+.cluster-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.cluster-status-grid-2 {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.status-card {
+  background: #f8f9fa;
+  border-radius: 6px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.health-card {
+  border-left: 4px solid #6c757d;
+}
+
+.health-card.health-ok {
+  border-left-color: #28a745;
+}
+
+.health-card.health-warn {
+  border-left-color: #ffc107;
+}
+
+.health-card.health-err {
+  border-left-color: #dc3545;
+}
+
+.status-label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  color: #888;
+  letter-spacing: 0.5px;
+}
+
+.status-value {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #222;
+}
+
+.status-sub {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.wide .status-value {
+  font-size: 1rem;
+}
+
+.storage-details,
+.io-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  font-size: 0.9rem;
+  color: #444;
+}

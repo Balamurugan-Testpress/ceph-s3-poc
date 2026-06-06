@@ -2,21 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml .
-COPY uv.lock* .
-
-RUN pip install uv
-
-RUN uv pip install --system \
-    fastapi \
-    uvicorn \
-    tortoise-orm \
-    asyncpg \
-    aerich \
-    pydantic \
-    python-dotenv \
-    httpx \
-    redis
+RUN pip install uv && uv pip install --system \
+    fastapi uvicorn pydantic python-dotenv httpx pyjwt boto3
 
 COPY . .
 

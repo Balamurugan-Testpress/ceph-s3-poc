@@ -1,0 +1,6 @@
+/* ─────────────────────────────────────────────
+   Global app layout overrides for router-based pages
+   ───────────────────────────────────────────── */
+
+/* Pages handle their own layout. This file exists so the build
+   system doesn't complain about a missing import in App.jsx. */

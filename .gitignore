@@ -37,3 +37,7 @@ build/
 # Coverage
 .coverage
 htmlcov/
+.pi/
+.agent/
+.codex/
+.opencode/
