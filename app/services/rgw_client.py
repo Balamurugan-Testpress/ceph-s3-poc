@@ -121,11 +121,23 @@ class RGWClient:
         except Exception as exc:
             raise RGWError(str(exc)) from exc
 
+    def get_s3_client(self):
+        """Expose the underlying boto3 S3 client for admin operations."""
+        return self._get_client()
+
     def delete_object(self, bucket: str, key: str) -> dict:
         """Delete an object."""
         try:
             self._get_client().delete_object(Bucket=bucket, Key=key)
             return {"bucket": bucket, "key": key, "deleted": True}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def delete_bucket(self, bucket: str) -> dict:
+        """Delete an empty bucket."""
+        try:
+            self._get_client().delete_bucket(Bucket=bucket)
+            return {"bucket": bucket, "deleted": True}
         except Exception as exc:
             raise RGWError(str(exc)) from exc
 

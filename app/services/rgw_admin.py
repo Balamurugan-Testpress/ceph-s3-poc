@@ -32,10 +32,10 @@ async def create_rgw_user(uid: str, display_name: str) -> dict:
         return resp
 
 
-async def delete_rgw_user(uid: str) -> dict:
+async def delete_rgw_user(uid: str) -> None:
     """Delete an RGW user from Ceph."""
     async with CephApiClient() as client:
-        return await client.delete(f"/api/rgw/user/{uid}")
+        await client.delete(f"/api/rgw/user/{uid}")
 
 
 def extract_rgw_keys(response: dict) -> tuple[str, str] | None:

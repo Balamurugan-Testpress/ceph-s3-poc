@@ -95,7 +95,7 @@ class CephApiClient:
         return resp.json()
 
 
-    async def request(self, method: str, path: str, **kwargs) -> dict | list:
+    async def request(self, method: str, path: str, **kwargs) -> dict | list | None:
         """Generic authenticated request to Ceph Dashboard API."""
         await self._ensure_auth()
         resp = await self._client.request(method, path, **kwargs)
@@ -103,6 +103,8 @@ class CephApiClient:
             raise CephApiError(
                 f"{method} {path} failed (HTTP {resp.status_code}): {resp.text[:300]}"
             )
+        if resp.status_code == 204 or not resp.content:
+            return None
         return resp.json()
 
     async def get(self, path: str, **kwargs) -> dict | list:
