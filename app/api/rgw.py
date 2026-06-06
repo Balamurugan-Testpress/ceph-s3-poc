@@ -6,7 +6,14 @@ Tenant: uses their own S3 keys — sees only their own buckets/objects.
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db import get_db
+from app.services.user_service import update_used_bytes
+
 
 from app.api.deps import get_current_user
 from app.services.rgw_client import RGWClient, RGWError
@@ -78,10 +85,25 @@ async def delete_object(
     bucket: str,
     key: str,
     current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
         client = _get_user_client(current_user)
-        return client.delete_object(bucket, key)
+        # Get object size before deleting (for usage tracking)
+        try:
+            head = client.get_s3_client().head_object(Bucket=bucket, Key=key)
+            obj_size = head.get("ContentLength", 0)
+        except Exception:
+            obj_size = 0
+
+        result = client.delete_object(bucket, key)
+
+        # Track usage
+        uid = uuid.UUID(current_user["id"]) if current_user["id"] != "admin" else None
+        if uid and obj_size:
+            await update_used_bytes(db, uid, -obj_size)
+
+        return result
     except RGWError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

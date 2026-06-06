@@ -81,3 +81,31 @@ async def update_rgw_creds(
     await db.commit()
     await db.refresh(user)
     return user
+
+
+async def update_used_bytes(db: AsyncSession, user_id: uuid.UUID, delta: int) -> None:
+    """Add *delta* bytes to the user's used_bytes (can be negative)."""
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        return
+    user.used_bytes = max(0, user.used_bytes + delta)
+    await db.commit()
+
+
+async def recalculate_usage(db: AsyncSession, user_id: uuid.UUID, rgw_client) -> int:
+    """Scan all objects across all buckets and update used_bytes.
+    Returns the recalculated total."""
+    total = 0
+    buckets = rgw_client.list_buckets()
+    for b in buckets:
+        while True:
+            objs = rgw_client.list_objects(b["name"], max_keys=1000)
+            total += sum(obj["size"] for obj in objs["objects"])
+            if not objs["is_truncated"]:
+                break
+
+    user = await get_user_by_id(db, user_id)
+    if user:
+        user.used_bytes = total
+        await db.commit()
+    return total
