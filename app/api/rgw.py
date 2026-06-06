@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -105,6 +106,45 @@ async def delete_object(
 
         return result
     except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+class BulkDeleteObjectsRequest(BaseModel):
+    keys: list[str]
+
+
+@router.post("/buckets/{bucket}/objects/bulk-delete")
+async def bulk_delete_objects(
+    bucket: str,
+    data: BulkDeleteObjectsRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        client = _get_user_client(current_user)
+        uid = uuid.UUID(current_user["id"]) if current_user["id"] != "admin" else None
+        results = []
+        total_size = 0
+
+        for key in data.keys:
+            try:
+                head = client.get_s3_client().head_object(Bucket=bucket, Key=key)
+                obj_size = head.get("ContentLength", 0)
+            except Exception:
+                obj_size = 0
+
+            try:
+                client.delete_object(bucket, key)
+                results.append({"key": key, "status": "deleted"})
+                total_size += obj_size
+            except Exception as exc:
+                results.append({"key": key, "status": "error", "detail": str(exc)})
+
+        if uid and total_size:
+            await update_used_bytes(db, uid, -total_size)
+
+        return {"results": results, "total_freed": total_size}
+    except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 

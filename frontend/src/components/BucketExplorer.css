@@ -60,6 +60,10 @@
   flex-wrap: wrap;
 }
 
+.be-meta-spacer {
+  flex: 1;
+}
+
 .be-truncated {
   color: #c05500;
   font-style: italic;
@@ -80,6 +84,25 @@
 }
 
 .be-load-all-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.be-bulk-del-btn {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  background: #dc3545;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.be-bulk-del-btn:hover {
+  background: #bb2d3b;
+}
+
+.be-bulk-del-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -116,6 +139,16 @@
 
 .be-table tr:hover td {
   background: #f8f9fa;
+}
+
+.be-row-selected {
+  background: #fff3cd !important;
+}
+
+.be-table th input[type="checkbox"],
+.be-table td input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
 }
 
 .be-key {

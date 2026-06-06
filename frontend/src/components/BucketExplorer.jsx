@@ -16,6 +16,8 @@ function BucketExplorer() {
   const [objectInfo, setObjectInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingObjects, setLoadingObjects] = useState(false);
+  const [objSelected, setObjSelected] = useState(new Set());
+  const [deletingObjs, setDeletingObjs] = useState(false);
 
   useEffect(() => {
     apiFetch("/api/rgw/buckets")
@@ -29,6 +31,7 @@ function BucketExplorer() {
     setObjects([]);
     setLoadingObjects(true);
     setObjectInfo(null);
+    setObjSelected(new Set());
     try {
       const data = await apiFetch(`/api/rgw/buckets/${name}/objects?max_keys=100`);
       setObjects(data.objects);
@@ -52,6 +55,42 @@ function BucketExplorer() {
     setLoadingObjects(false);
   }
 
+  function toggleObj(key) {
+    setObjSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleAllObjs() {
+    if (objSelected.size === objects.length) {
+      setObjSelected(new Set());
+    } else {
+      setObjSelected(new Set(objects.map((o) => o.key)));
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (objSelected.size === 0) return;
+    if (!confirm(`Delete ${objSelected.size} object(s)?`)) return;
+    setDeletingObjs(true);
+    try {
+      const resp = await apiFetch(`/api/rgw/buckets/${selected}/objects/bulk-delete`, {
+        method: "POST",
+        body: JSON.stringify({ keys: Array.from(objSelected) }),
+      });
+      const kept = objects.filter((o) => !objSelected.has(o.key));
+      setObjects(kept);
+      setObjSelected(new Set());
+      setObjectInfo((prev) => prev ? { ...prev, count: kept.length, total: kept.length } : null);
+    } catch (err) {
+      alert(err.message);
+    }
+    setDeletingObjs(false);
+  }
+
   async function handleDelete(bucket, key) {
     if (!confirm(`Delete "${key}"?`)) return;
     try {
@@ -59,6 +98,7 @@ function BucketExplorer() {
         method: "DELETE",
       });
       setObjects((prev) => prev.filter((o) => o.key !== key));
+      setObjSelected((prev) => { const next = new Set(prev); next.delete(key); return next; });
     } catch (err) {
       alert(err.message);
     }
@@ -66,9 +106,7 @@ function BucketExplorer() {
 
   async function handleDownload(bucket, key) {
     try {
-      const data = await apiFetch(
-        `/api/rgw/buckets/${bucket}/objects/${encodeURI(key)}/download`
-      );
+      const data = await apiFetch(`/api/rgw/buckets/${bucket}/objects/${encodeURI(key)}/download`);
       window.open(data.url, "_blank");
     } catch (err) {
       alert(err.message);
@@ -104,14 +142,16 @@ function BucketExplorer() {
               <>
                 {" "}
                 <span className="be-truncated">(showing first 100)</span>
-                <button
-                  className="be-load-all-btn"
-                  onClick={() => fetchAll(selected)}
-                  disabled={loadingObjects}
-                >
+                <button className="be-load-all-btn" onClick={() => fetchAll(selected)} disabled={loadingObjects}>
                   {loadingObjects ? "Loading…" : "Load All Objects"}
                 </button>
               </>
+            )}
+            <div className="be-meta-spacer" />
+            {objSelected.size > 0 && (
+              <button className="be-bulk-del-btn" onClick={handleBulkDelete} disabled={deletingObjs}>
+                {deletingObjs ? "Deleting…" : `Delete ${objSelected.size}`}
+              </button>
             )}
           </div>
         )}
@@ -123,6 +163,9 @@ function BucketExplorer() {
             <table className="be-table">
               <thead>
                 <tr>
+                  <th>
+                    <input type="checkbox" onChange={toggleAllObjs} checked={objSelected.size === objects.length && objects.length > 0} />
+                  </th>
                   <th>Key</th>
                   <th>Size</th>
                   <th>Last Modified</th>
@@ -131,25 +174,16 @@ function BucketExplorer() {
               </thead>
               <tbody>
                 {objects.map((obj) => (
-                  <tr key={obj.key}>
+                  <tr key={obj.key} className={objSelected.has(obj.key) ? "be-row-selected" : ""}>
+                    <td>
+                      <input type="checkbox" checked={objSelected.has(obj.key)} onChange={() => toggleObj(obj.key)} />
+                    </td>
                     <td className="be-key">{obj.key}</td>
                     <td>{formatBytes(obj.size)}</td>
                     <td>{obj.last_modified?.slice(0, 19)?.replace("T", " ")}</td>
                     <td className="be-actions">
-                      <button
-                        className="be-act-btn be-dl"
-                        title="Download"
-                        onClick={() => handleDownload(selected, obj.key)}
-                      >
-                        ⬇
-                      </button>
-                      <button
-                        className="be-act-btn be-del"
-                        title="Delete"
-                        onClick={() => handleDelete(selected, obj.key)}
-                      >
-                        ✕
-                      </button>
+                      <button className="be-act-btn be-dl" title="Download" onClick={() => handleDownload(selected, obj.key)}>⬇</button>
+                      <button className="be-act-btn be-del" title="Delete" onClick={() => handleDelete(selected, obj.key)}>✕</button>
                     </td>
                   </tr>
                 ))}

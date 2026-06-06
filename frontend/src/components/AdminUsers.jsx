@@ -9,6 +9,8 @@ function AdminUsers() {
   const [form, setForm] = useState({ username: "", password: "", display_name: "", quota_gb: 1 });
   const [result, setResult] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -41,6 +43,44 @@ function AdminUsers() {
     setCreating(false);
   }
 
+  function toggleSelect(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (selected.size === users.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(users.map((u) => u.id)));
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (selected.size === 0) return;
+    if (!confirm(`Delete ${selected.size} user(s)? This will also remove their RGW users and all buckets.`)) return;
+    setDeleting(true);
+    try {
+      const resp = await apiFetch("/api/admin/users/bulk-delete", {
+        method: "POST",
+        body: JSON.stringify({ user_ids: Array.from(selected) }),
+      });
+      const failed = resp.results.filter((r) => r.status !== "deleted");
+      if (failed.length > 0) {
+        alert(`${failed.length} deletion(s) failed:\n${failed.map((f) => `${f.id}: ${f.detail || f.status}`).join("\n")}`);
+      }
+      setSelected(new Set());
+      loadUsers();
+    } catch (err) {
+      alert(err.message);
+    }
+    setDeleting(false);
+  }
+
   async function handleDelete(userId) {
     if (!confirm("Delete this user?")) return;
     try {
@@ -62,9 +102,16 @@ function AdminUsers() {
     <div className="admin-users">
       <div className="au-header">
         <h3>Users</h3>
-        <button className="au-create-btn" onClick={() => setShowForm(!showForm)}>
-          {showForm ? "Cancel" : "+ New User"}
-        </button>
+        <div className="au-header-actions">
+          {selected.size > 0 && (
+            <button className="au-bulk-del-btn" onClick={handleBulkDelete} disabled={deleting}>
+              {deleting ? "Deleting…" : `Delete ${selected.size}`}
+            </button>
+          )}
+          <button className="au-create-btn" onClick={() => setShowForm(!showForm)}>
+            {showForm ? "Cancel" : "+ New User"}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -102,9 +149,7 @@ function AdminUsers() {
         </form>
       )}
 
-      {result && !result.success && (
-        <div className="au-error">{result.error}</div>
-      )}
+      {result && !result.success && <div className="au-error">{result.error}</div>}
       {result?.success && result.data?.rgw_access_key && (
         <div className="au-keys-reveal">
           <strong>RGW Credentials — save these!</strong>
@@ -116,13 +161,15 @@ function AdminUsers() {
       )}
 
       {loading && <div className="au-loading">Loading users…</div>}
-
       {!loading && users.length === 0 && <p className="au-empty">No users yet</p>}
 
       {users.length > 0 && (
         <table className="au-table">
           <thead>
             <tr>
+              <th>
+                <input type="checkbox" onChange={toggleAll} checked={selected.size === users.length && users.length > 0} />
+              </th>
               <th>Username</th>
               <th>Display Name</th>
               <th>Quota</th>
@@ -134,27 +181,24 @@ function AdminUsers() {
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id}>
+              <tr key={u.id} className={selected.has(u.id) ? "au-row-selected" : ""}>
+                <td>
+                  <input type="checkbox" checked={selected.has(u.id)} onChange={() => toggleSelect(u.id)} />
+                </td>
                 <td>{u.username}</td>
                 <td>{u.display_name}</td>
                 <td>{formatBytes(u.quota_bytes)}</td>
                 <td>{formatBytes(u.used_bytes)}</td>
                 <td>
                   {u.rgw_user_id ? (
-                    <span className="au-synced" title={`RGW user: ${u.rgw_user_id}`}>
-                      ✓ synced
-                    </span>
+                    <span className="au-synced" title={`RGW user: ${u.rgw_user_id}`}>✓ synced</span>
                   ) : (
                     <span className="au-unsynced">✗ not synced</span>
                   )}
                 </td>
                 <td>{u.created_at?.slice(0, 10)}</td>
                 <td>
-                  {u.role !== "admin" && (
-                    <button className="au-delete-btn" onClick={() => handleDelete(u.id)}>
-                      Delete
-                    </button>
-                  )}
+                  <button className="au-delete-btn" onClick={() => handleDelete(u.id)}>Delete</button>
                 </td>
               </tr>
             ))}

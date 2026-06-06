@@ -137,8 +137,51 @@ async def delete_existing_user(user_id: uuid.UUID, db: AsyncSession = Depends(ge
     return {"message": "User and all associated resources deleted"}
 
 
+class BulkDeleteUsersRequest(BaseModel):
+    user_ids: list[uuid.UUID]
+
+
 class UpdateQuotaRequest(BaseModel):
     quota_gb: int
+
+
+@router.post("/users/bulk-delete")
+async def bulk_delete_users(
+    data: BulkDeleteUsersRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    results = []
+    for uid in data.user_ids:
+        try:
+            user = await get_user_by_id(db, uid)
+            if not user:
+                results.append({"id": str(uid), "status": "not_found"})
+                continue
+
+            errors = []
+            if user.rgw_access_key and user.rgw_secret_key:
+                try:
+                    await _delete_user_buckets(user.rgw_access_key, user.rgw_secret_key)
+                except Exception as exc:
+                    errors.append(f"bucket cleanup failed: {exc}")
+
+            if user.rgw_user_id:
+                try:
+                    await delete_rgw_user(user.rgw_user_id)
+                except Exception as exc:
+                    errors.append(f"RGW user deletion failed: {exc}")
+
+            await delete_user(db, uid)
+            results.append({
+                "id": str(uid),
+                "status": "deleted",
+                "warnings": errors if errors else None,
+            })
+        except Exception as exc:
+            results.append({"id": str(uid), "status": "error", "detail": str(exc)})
+
+    return {"results": results}
 
 
 @router.patch("/users/{user_id}/quota")

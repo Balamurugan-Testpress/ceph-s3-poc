@@ -15,6 +15,31 @@
   color: #555;
 }
 
+.au-header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.au-bulk-del-btn {
+  padding: 0.35rem 0.85rem;
+  background: #dc3545;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.au-bulk-del-btn:hover {
+  background: #bb2d3b;
+}
+
+.au-bulk-del-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .au-create-btn {
   padding: 0.35rem 0.85rem;
   background: #198754;
@@ -133,6 +158,16 @@
 
 .au-table tr:hover td {
   background: #f8f9fa;
+}
+
+.au-row-selected {
+  background: #fff3cd !important;
+}
+
+.au-table th input[type="checkbox"],
+.au-table td input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
 }
 
 .au-delete-btn {
