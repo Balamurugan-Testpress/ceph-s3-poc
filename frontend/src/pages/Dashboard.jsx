@@ -4,6 +4,7 @@ import ClusterStatus from "../components/ClusterStatus";
 import BucketExplorer from "../components/BucketExplorer";
 import AdminUsers from "../components/AdminUsers";
 import S3Actions from "../components/S3Actions";
+import QuotaUsage from "../components/QuotaUsage";
 import "./Dashboard.css";
 
 function Dashboard() {
@@ -33,10 +34,19 @@ function Dashboard() {
       </header>
 
       <main className="dashboard-main">
-        <section className="dashboard-section">
-          <h2>Cluster Status</h2>
-          <ClusterStatus />
-        </section>
+        {isAdmin && (
+          <section className="dashboard-section">
+            <h2>Cluster Status</h2>
+            <ClusterStatus />
+          </section>
+        )}
+
+        {!isAdmin && (
+          <section className="dashboard-section">
+            <h2>My Storage</h2>
+            <QuotaUsage />
+          </section>
+        )}
 
         {isAdmin && (
           <section className="dashboard-section">

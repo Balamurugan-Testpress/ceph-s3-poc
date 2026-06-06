@@ -1,16 +1,15 @@
-"""RGW S3 endpoints — list buckets and objects using the logged-in user's keys.
+"""RGW S3 endpoints — list buckets and objects.
 
-Admin users use the env-var RGW_ACCESS_KEY / RGW_SECRET_KEY.
-Tenant users use their per-user RGW credentials stored in the DB.
+Admin: uses Ceph Dashboard API to see ALL buckets, S3 admin keys for objects.
+Tenant: uses their own S3 keys — sees only their own buckets/objects.
 """
 
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.services.ceph_api import CephApiClient, CephApiError
 from app.services.rgw_client import RGWClient, RGWError
 
 router = APIRouter(prefix="/rgw", tags=["rgw"])
@@ -38,6 +37,17 @@ def _get_user_client(current_user: dict) -> RGWClient:
 
 @router.get("/buckets")
 async def list_buckets(current_user: dict = Depends(get_current_user)):
+    # Admin — list ALL buckets via Ceph Dashboard API
+    if current_user["id"] == ADMIN_ID:
+        try:
+            async with CephApiClient() as ceph:
+                bucket_names = await ceph.get("/api/rgw/bucket")
+                buckets = [{"name": name, "creation_date": ""} for name in bucket_names]
+                return {"buckets": buckets}
+        except CephApiError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    # Tenant — list only their own buckets via S3
     try:
         client = _get_user_client(current_user)
         return {"buckets": client.list_buckets()}
