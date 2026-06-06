@@ -113,6 +113,9 @@ class CephApiClient:
     async def post(self, path: str, **kwargs) -> dict | list:
         return await self.request("POST", path, **kwargs)
 
+    async def put(self, path: str, **kwargs) -> dict | list | None:
+        return await self.request("PUT", path, **kwargs)
+
     async def delete(self, path: str, **kwargs) -> dict | list:
         return await self.request("DELETE", path, **kwargs)
 

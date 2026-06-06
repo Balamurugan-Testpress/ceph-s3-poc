@@ -36,14 +36,25 @@ async def upload_object(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload a file and track usage delta."""
+    """Upload a file and track usage delta. Blocks if over quota."""
     try:
         contents = await file.read()
+        uid = uuid.UUID(current_user["id"]) if current_user["id"] != "admin" else None
+
+        # Quota check (tenants only)
+        if uid:
+            used = current_user.get("used_bytes", 0)
+            quota = current_user.get("quota_bytes", 0)
+            if used + len(contents) > quota:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Quota exceeded: {used + len(contents)} > {quota} bytes",
+                )
+
         client = _get_user_client(current_user)
         result = client.upload_object(bucket, file.filename or "unnamed", contents)
 
         # Track usage
-        uid = uuid.UUID(current_user["id"]) if current_user["id"] != "admin" else None
         if uid:
             await update_used_bytes(db, uid, len(contents))
 

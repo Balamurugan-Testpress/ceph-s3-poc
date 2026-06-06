@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin
 from app.db import get_db
+from pydantic import BaseModel
+
 from app.db.schemas import CreateUserRequest, UserCreatedResponse, UserOut
 from app.services.rgw_admin import create_rgw_user, delete_rgw_user, extract_rgw_keys
 from app.services.rgw_client import RGWClient
@@ -66,6 +68,14 @@ async def create_new_user(data: CreateUserRequest, db: AsyncSession = Depends(ge
 
     access_key, secret_key = keys
     user = await update_rgw_creds(db, user.id, rgw_uid, access_key, secret_key)
+
+    # 4. Set quota in Ceph (native S3-level enforcement)
+    try:
+        from app.services.rgw_admin import set_rgw_user_quota
+        await set_rgw_user_quota(rgw_uid, data.quota_gb * 1_073_741_824)
+    except Exception:
+        pass  # non-critical — our app-level check still works
+
     return UserCreatedResponse(
         message="User created with RGW credentials",
         user=user,
@@ -125,3 +135,31 @@ async def delete_existing_user(user_id: uuid.UUID, db: AsyncSession = Depends(ge
             "warnings": errors,
         }
     return {"message": "User and all associated resources deleted"}
+
+
+class UpdateQuotaRequest(BaseModel):
+    quota_gb: int
+
+
+@router.patch("/users/{user_id}/quota")
+async def update_quota(
+    user_id: uuid.UUID,
+    data: UpdateQuotaRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.quota_bytes = data.quota_gb * 1_073_741_824
+    await db.commit()
+
+    # Sync quota to Ceph (native S3-level enforcement)
+    if user.rgw_user_id:
+        try:
+            from app.services.rgw_admin import set_rgw_user_quota
+            await set_rgw_user_quota(user.rgw_user_id, user.quota_bytes)
+        except Exception:
+            pass  # non-critical
+
+    return {"message": f"Quota updated to {data.quota_gb} GB"}
