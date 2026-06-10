@@ -6,7 +6,7 @@ import os
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.db.models import Base
+from app.db.models import Base as Base
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",

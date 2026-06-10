@@ -42,11 +42,11 @@ async def create_new_user(data: CreateUserRequest, db: AsyncSession = Depends(ge
         username=data.username,
         password=data.password,
         display_name=data.display_name,
-        quota_mb=data.quota_mb,
+        quota_mb=(data.user_quota_max_size_kb // 1024) if (data.user_quota_enabled and data.user_quota_max_size_kb > 0) else -1,
     )
 
     try:
-        rgw_uid = f"app-{data.username}-{user.id.hex[:8]}"
+        rgw_uid = data.username
         rgw_resp = await create_rgw_user(
             uid=rgw_uid,
             display_name=data.display_name or data.username,
@@ -71,10 +71,35 @@ async def create_new_user(data: CreateUserRequest, db: AsyncSession = Depends(ge
 
     # 4. Set quota in Ceph (native S3-level enforcement)
     try:
-        from app.services.rgw_admin import set_rgw_user_quota
-        await set_rgw_user_quota(rgw_uid, data.quota_mb * 1_048_576)
-    except Exception:
-        pass  # non-critical — our app-level check still works
+        from app.services.rgw_admin import set_rgw_quota, set_rgw_ratelimit
+
+        if data.user_quota_enabled:
+            await set_rgw_quota(
+                rgw_uid,
+                "user",
+                True,
+                data.user_quota_max_size_kb,
+                data.user_quota_max_objects,
+            )
+        if data.bucket_quota_enabled:
+            await set_rgw_quota(
+                rgw_uid,
+                "bucket",
+                True,
+                data.bucket_quota_max_size_kb,
+                data.bucket_quota_max_objects,
+            )
+        if data.rate_limit_enabled:
+            await set_rgw_ratelimit(
+                rgw_uid,
+                True,
+                data.rate_limit_max_read_ops,
+                data.rate_limit_max_write_ops,
+                data.rate_limit_max_read_bytes,
+                data.rate_limit_max_write_bytes,
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Error setting advanced limits: {e}")
 
     return UserCreatedResponse(
         message="User created with RGW credentials",
@@ -105,7 +130,11 @@ async def _delete_user_buckets(ak: str, sk: str) -> None:
 
 
 @router.delete("/users/{user_id}")
-async def delete_existing_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), admin: dict = Depends(require_admin)):
+async def delete_existing_user(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
     user = await get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -173,11 +202,13 @@ async def bulk_delete_users(
                     errors.append(f"RGW user deletion failed: {exc}")
 
             await delete_user(db, uid)
-            results.append({
-                "id": str(uid),
-                "status": "deleted",
-                "warnings": errors if errors else None,
-            })
+            results.append(
+                {
+                    "id": str(uid),
+                    "status": "deleted",
+                    "warnings": errors if errors else None,
+                }
+            )
         except Exception as exc:
             results.append({"id": str(uid), "status": "error", "detail": str(exc)})
 
@@ -200,8 +231,11 @@ async def update_quota(
     # Sync quota to Ceph (native S3-level enforcement)
     if user.rgw_user_id:
         try:
-            from app.services.rgw_admin import set_rgw_user_quota
-            await set_rgw_user_quota(user.rgw_user_id, user.quota_bytes)
+            from app.services.rgw_admin import set_rgw_quota
+
+            await set_rgw_quota(
+                user.rgw_user_id, "user", True, data.quota_mb * 1024, -1
+            )
         except Exception:
             pass  # non-critical
 

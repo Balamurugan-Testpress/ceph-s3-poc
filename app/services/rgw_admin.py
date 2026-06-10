@@ -46,24 +46,42 @@ def extract_rgw_keys(response: dict) -> tuple[str, str] | None:
     return None
 
 
-async def set_rgw_user_quota(uid: str, quota_bytes: int, max_objects: int = -1) -> None:
-    """Set a user-level quota in Ceph via the Dashboard API.
+async def set_rgw_quota(
+    uid: str, quota_type: str, enabled: bool, max_size_kb: int, max_objects: int
+) -> None:
+    """Set quota in Ceph via the Dashboard API.
 
-    ``quota_bytes`` is the max storage (in bytes). 0 disables quota.
-    ``max_objects`` is the max object count. -1 for unlimited.
-
-    The Ceph Dashboard API expects ``max_size_kb`` in KiB.
+    quota_type: 'user' or 'bucket'
     """
-    enabled = "true" if quota_bytes > 0 else "false"
-    max_size_kb = max(0, quota_bytes // 1024) if quota_bytes > 0 else 0
-
     async with CephApiClient() as client:
         await client.put(
             f"/api/rgw/user/{uid}/quota",
             json={
-                "quota_type": "user",
-                "enabled": enabled,
+                "quota_type": quota_type,
+                "enabled": "true" if enabled else "false",
                 "max_size_kb": max_size_kb,
                 "max_objects": str(max_objects),
+            },
+        )
+
+
+async def set_rgw_ratelimit(
+    uid: str,
+    enabled: bool,
+    max_read_ops: int,
+    max_write_ops: int,
+    max_read_bytes: int,
+    max_write_bytes: int,
+) -> None:
+    """Set user rate limits in Ceph via the Dashboard API."""
+    async with CephApiClient() as client:
+        await client.put(
+            f"/api/rgw/user/{uid}/ratelimit",
+            json={
+                "enabled": enabled,
+                "max_read_ops": max_read_ops,
+                "max_write_ops": max_write_ops,
+                "max_read_bytes": max_read_bytes,
+                "max_write_bytes": max_write_bytes,
             },
         )

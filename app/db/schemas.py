@@ -10,11 +10,24 @@ from pydantic import BaseModel, Field
 
 # ── Request schemas ──
 
+
 class CreateUserRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=100)
     password: str = Field(..., min_length=4, max_length=200)
     display_name: str = Field(default="", max_length=200)
-    quota_mb: int = Field(default=100, ge=1, le=999999)
+
+    user_quota_enabled: bool = False
+    user_quota_max_size_kb: int = -1
+    user_quota_max_objects: int = -1
+    bucket_quota_enabled: bool = False
+    bucket_quota_max_size_kb: int = -1
+    bucket_quota_max_objects: int = -1
+
+    rate_limit_enabled: bool = False
+    rate_limit_max_read_ops: int = 0
+    rate_limit_max_write_ops: int = 0
+    rate_limit_max_read_bytes: int = 0
+    rate_limit_max_write_bytes: int = 0
 
 
 class CreateBucketRequest(BaseModel):
