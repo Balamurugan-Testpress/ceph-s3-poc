@@ -13,7 +13,13 @@ function AdminUsers() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ username: "", password: "", display_name: "", quota_mb: 100 });
+  const initialForm = {
+    username: "", password: "", display_name: "",
+    user_quota_enabled: false, user_quota_max_size_kb: -1, user_quota_max_objects: -1,
+    bucket_quota_enabled: false, bucket_quota_max_size_kb: -1, bucket_quota_max_objects: -1,
+    rate_limit_enabled: false, rate_limit_max_read_ops: 0, rate_limit_max_write_ops: 0, rate_limit_max_read_bytes: 0, rate_limit_max_write_bytes: 0
+  };
+  const [form, setForm] = useState(initialForm);
   const [result, setResult] = useState(null);
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState(new Set());
@@ -43,7 +49,7 @@ function AdminUsers() {
       });
       setResult({ success: true, data: resp });
       setShowForm(false);
-      setForm({ username: "", password: "", display_name: "", quota_mb: 100 });
+      setForm(initialForm);
       loadUsers();
     } catch (err) {
       setResult({ success: false, error: err.message });
@@ -134,38 +140,105 @@ function AdminUsers() {
       </div>
 
       {showForm && (
-        <form className="au-form" onSubmit={handleCreate}>
-          <input
-            placeholder="Username"
-            value={form.username}
-            onChange={(e) => setForm({ ...form, username: e.target.value })}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            required
-          />
-          <input
-            placeholder="Display Name"
-            value={form.display_name}
-            onChange={(e) => setForm({ ...form, display_name: e.target.value })}
-          />
-          <div className="au-form-row">
-            <label>Quota (MB):</label>
-            <input
-              type="number"
-              min="1"
-              value={form.quota_mb}
-              onChange={(e) => setForm({ ...form, quota_mb: parseInt(e.target.value) || 1 })}
-            />
+        <div className="au-modal-overlay">
+          <div className="au-modal">
+            <h3>Create New User</h3>
+            <form className="au-modal-form" onSubmit={handleCreate}>
+              <div className="au-form-grid">
+                <div className="au-field">
+                  <label>Username</label>
+                  <input value={form.username} onChange={e => setForm({...form, username: e.target.value})} required />
+                </div>
+                <div className="au-field">
+                  <label>Password</label>
+                  <input type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
+                </div>
+                <div className="au-field" style={{ gridColumn: "1 / -1" }}>
+                  <label>Display Name</label>
+                  <input value={form.display_name} onChange={e => setForm({...form, display_name: e.target.value})} />
+                </div>
+              </div>
+
+              <fieldset className="au-fieldset">
+                <legend>
+                  <label className="au-field-checkbox">
+                    <input type="checkbox" checked={form.user_quota_enabled} onChange={e => setForm({...form, user_quota_enabled: e.target.checked})} />
+                    Enable User Quota
+                  </label>
+                </legend>
+                {form.user_quota_enabled && (
+                  <div className="au-form-grid">
+                    <div className="au-field">
+                      <label>Max Size (KB) [-1 for unlimited]</label>
+                      <input type="number" value={form.user_quota_max_size_kb} onChange={e => setForm({...form, user_quota_max_size_kb: parseInt(e.target.value) || -1})} />
+                    </div>
+                    <div className="au-field">
+                      <label>Max Objects [-1 for unlimited]</label>
+                      <input type="number" value={form.user_quota_max_objects} onChange={e => setForm({...form, user_quota_max_objects: parseInt(e.target.value) || -1})} />
+                    </div>
+                  </div>
+                )}
+              </fieldset>
+
+              <fieldset className="au-fieldset">
+                <legend>
+                  <label className="au-field-checkbox">
+                    <input type="checkbox" checked={form.bucket_quota_enabled} onChange={e => setForm({...form, bucket_quota_enabled: e.target.checked})} />
+                    Enable Bucket Quota
+                  </label>
+                </legend>
+                {form.bucket_quota_enabled && (
+                  <div className="au-form-grid">
+                    <div className="au-field">
+                      <label>Max Size (KB) [-1 for unlimited]</label>
+                      <input type="number" value={form.bucket_quota_max_size_kb} onChange={e => setForm({...form, bucket_quota_max_size_kb: parseInt(e.target.value) || -1})} />
+                    </div>
+                    <div className="au-field">
+                      <label>Max Objects [-1 for unlimited]</label>
+                      <input type="number" value={form.bucket_quota_max_objects} onChange={e => setForm({...form, bucket_quota_max_objects: parseInt(e.target.value) || -1})} />
+                    </div>
+                  </div>
+                )}
+              </fieldset>
+
+              <fieldset className="au-fieldset">
+                <legend>
+                  <label className="au-field-checkbox">
+                    <input type="checkbox" checked={form.rate_limit_enabled} onChange={e => setForm({...form, rate_limit_enabled: e.target.checked})} />
+                    Enable User Rate Limit
+                  </label>
+                </legend>
+                {form.rate_limit_enabled && (
+                  <div className="au-form-grid">
+                    <div className="au-field">
+                      <label>Max Read Ops (0 for unlimited)</label>
+                      <input type="number" value={form.rate_limit_max_read_ops} onChange={e => setForm({...form, rate_limit_max_read_ops: parseInt(e.target.value) || 0})} />
+                    </div>
+                    <div className="au-field">
+                      <label>Max Write Ops (0 for unlimited)</label>
+                      <input type="number" value={form.rate_limit_max_write_ops} onChange={e => setForm({...form, rate_limit_max_write_ops: parseInt(e.target.value) || 0})} />
+                    </div>
+                    <div className="au-field">
+                      <label>Max Read Bytes (0 for unlimited)</label>
+                      <input type="number" value={form.rate_limit_max_read_bytes} onChange={e => setForm({...form, rate_limit_max_read_bytes: parseInt(e.target.value) || 0})} />
+                    </div>
+                    <div className="au-field">
+                      <label>Max Write Bytes (0 for unlimited)</label>
+                      <input type="number" value={form.rate_limit_max_write_bytes} onChange={e => setForm({...form, rate_limit_max_write_bytes: parseInt(e.target.value) || 0})} />
+                    </div>
+                  </div>
+                )}
+              </fieldset>
+
+              <div className="au-modal-actions">
+                <button type="button" className="au-btn-cancel" onClick={() => setShowForm(false)}>Cancel</button>
+                <button type="submit" className="au-btn-submit" disabled={creating}>
+                  {creating ? "Creating…" : "Create User"}
+                </button>
+              </div>
+            </form>
           </div>
-          <button type="submit" disabled={creating}>
-            {creating ? "Creating…" : "Create User"}
-          </button>
-        </form>
+        </div>
       )}
 
       {result && !result.success && <div className="au-error">{result.error}</div>}
