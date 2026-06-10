@@ -11,7 +11,8 @@ from app.api.deps import require_admin
 from app.db import get_db
 from pydantic import BaseModel
 
-from app.db.schemas import CreateUserRequest, UserCreatedResponse, UserOut
+from app.db.schemas import CreateUserRequest, UserCreatedResponse, UserOut, AuditLogOut
+from app.services.audit_service import get_audit_logs, log_action
 from app.services.rgw_admin import create_rgw_user, delete_rgw_user, extract_rgw_keys
 from app.services.rgw_client import RGWClient
 from app.services.user_service import (
@@ -27,12 +28,25 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @router.get("/users", response_model=list[UserOut])
-async def list_all_users(db: AsyncSession = Depends(get_db), admin: dict = Depends(require_admin)):
+async def list_all_users(
+    db: AsyncSession = Depends(get_db), admin: dict = Depends(require_admin)
+):
     return await list_users(db)
 
 
+@router.get("/audit-logs", response_model=list[AuditLogOut])
+async def list_audit_logs(
+    db: AsyncSession = Depends(get_db), admin: dict = Depends(require_admin)
+):
+    return await get_audit_logs(db)
+
+
 @router.post("/users", response_model=UserCreatedResponse)
-async def create_new_user(data: CreateUserRequest, db: AsyncSession = Depends(get_db), admin: dict = Depends(require_admin)):
+async def create_new_user(
+    data: CreateUserRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
     existing = await get_user_by_username(db, data.username)
     if existing:
         raise HTTPException(status_code=409, detail="Username already exists")
@@ -101,6 +115,10 @@ async def create_new_user(data: CreateUserRequest, db: AsyncSession = Depends(ge
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Error setting advanced limits: {e}")
 
+    await log_action(
+        db, admin, "CREATE_USER", {"username": data.username, "quota_mb": data.quota_mb}
+    )
+
     return UserCreatedResponse(
         message="User created with RGW credentials",
         user=user,
@@ -156,7 +174,11 @@ async def delete_existing_user(
             errors.append(f"RGW user deletion failed: {exc}")
 
     # 3. Delete from our DB
+    username = user.username
     await delete_user(db, user_id)
+    await log_action(
+        db, admin, "DELETE_USER", {"username": username, "user_id": str(user_id)}
+    )
 
     if errors:
         return {
@@ -202,6 +224,12 @@ async def bulk_delete_users(
                     errors.append(f"RGW user deletion failed: {exc}")
 
             await delete_user(db, uid)
+            await log_action(
+                db,
+                admin,
+                "DELETE_USER",
+                {"username": user.username, "user_id": str(uid)},
+            )
             results.append(
                 {
                     "id": str(uid),

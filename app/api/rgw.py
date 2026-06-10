@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.services.user_service import update_used_bytes
+from app.services.audit_service import log_action
 
 
 from app.api.deps import get_current_user
@@ -75,7 +76,9 @@ async def list_objects(
         client = _get_user_client(current_user)
         if fetch_all:
             return client.list_all_objects(name)
-        return client.list_objects(name, max_keys=max_keys, continuation_token=continuation_token)
+        return client.list_objects(
+            name, max_keys=max_keys, continuation_token=continuation_token
+        )
     except RGWError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -102,6 +105,10 @@ async def delete_object(
         uid = uuid.UUID(current_user["id"]) if current_user["id"] != "admin" else None
         if uid and obj_size:
             await update_used_bytes(db, uid, -obj_size)
+
+        await log_action(
+            db, current_user, "DELETE_OBJECT", {"bucket": bucket, "key": key}
+        )
 
         return result
     except RGWError as exc:
@@ -142,6 +149,13 @@ async def bulk_delete_objects(
         if uid and total_size:
             await update_used_bytes(db, uid, -total_size)
 
+        await log_action(
+            db,
+            current_user,
+            "DELETE_OBJECT",
+            {"bucket": bucket, "keys": data.keys, "bulk": True},
+        )
+
         return {"results": results, "total_freed": total_size}
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -152,11 +166,15 @@ async def download_object(
     bucket: str,
     key: str,
     current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get a presigned download URL valid for 1 hour."""
     try:
         client = _get_user_client(current_user)
         url = client.presigned_url(bucket, key)
+        await log_action(
+            db, current_user, "DOWNLOAD_OBJECT", {"bucket": bucket, "key": key}
+        )
         return {"url": url}
     except RGWError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

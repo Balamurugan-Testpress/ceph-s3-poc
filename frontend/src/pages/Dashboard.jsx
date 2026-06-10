@@ -3,6 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import ClusterStatus from "../components/ClusterStatus";
 import BucketExplorer from "../components/BucketExplorer";
 import AdminUsers from "../components/AdminUsers";
+import AuditLogs from "../components/AuditLogs";
 import S3Actions from "../components/S3Actions";
 import QuotaUsage from "../components/QuotaUsage";
 import CredentialsPanel from "../components/CredentialsPanel";
@@ -60,6 +61,13 @@ function Dashboard() {
           <section className="dashboard-section">
             <h2>User Management</h2>
             <AdminUsers />
+          </section>
+        )}
+
+        {isAdmin && (
+          <section className="dashboard-section">
+            <h2>Audit Logs</h2>
+            <AuditLogs />
           </section>
         )}
 

@@ -41,6 +41,7 @@ class LoginRequest(BaseModel):
 
 # ── Response schemas ──
 
+
 class UserOut(BaseModel):
     id: UUID | str
     username: str
@@ -65,3 +66,14 @@ class UserCreatedResponse(BaseModel):
     user: UserOut
     rgw_access_key: str | None = None
     rgw_secret_key: str | None = None
+
+
+class AuditLogOut(BaseModel):
+    id: UUID
+    user_id: str
+    username: str
+    action: str
+    details: str | None = None
+    timestamp: datetime
+
+    model_config = {"from_attributes": True}

@@ -13,6 +13,7 @@ from app.db import get_db
 from app.db.schemas import CreateBucketRequest
 from app.services.rgw_client import RGWError
 from app.services.user_service import recalculate_usage, update_used_bytes
+from app.services.audit_service import log_action
 
 router = APIRouter(prefix="/s3", tags=["s3"])
 
@@ -21,10 +22,28 @@ router = APIRouter(prefix="/s3", tags=["s3"])
 async def create_bucket(
     data: CreateBucketRequest,
     current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
         client = _get_user_client(current_user)
-        return client.create_bucket(data.name)
+        result = client.create_bucket(data.name)
+        await log_action(db, current_user, "CREATE_BUCKET", {"bucket": data.name})
+        return result
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.delete("/buckets/{bucket}")
+async def delete_bucket(
+    bucket: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        client = _get_user_client(current_user)
+        result = client.delete_bucket(bucket)
+        await log_action(db, current_user, "DELETE_BUCKET", {"bucket": bucket})
+        return result
     except RGWError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -57,6 +76,13 @@ async def upload_object(
         # Track usage
         if uid:
             await update_used_bytes(db, uid, len(contents))
+
+        await log_action(
+            db,
+            current_user,
+            "UPLOAD_OBJECT",
+            {"bucket": bucket, "key": file.filename or "unnamed"},
+        )
 
         return result
     except RGWError as exc:
