@@ -20,9 +20,10 @@ cd /path/to/ceph-s3-poc
 docker compose up --build
 ```
 
-This builds and starts 2 containers:
+This builds and starts 3 containers:
 - `ceph-s3-api` on port 8000
 - `ceph-s3-frontend` on port 5173
+- `ceph-s3-db` (PostgreSQL) on port 5432
 
 Open **http://localhost:5173** in your browser.
 
@@ -49,6 +50,9 @@ Open **http://localhost:5173** in your browser.
 All configuration is in `.env` at the project root:
 
 ```bash
+# ── Database ──
+DATABASE_URL=postgresql+asyncpg://cephs3:cephs3@db:5432/cephs3
+
 # ── Ceph Dashboard API ──
 CEPH_API_URL=https://142.132.138.10:8443    # Cluster's dashboard API
 CEPH_API_USERNAME=admin                     # Dashboard login
@@ -91,7 +95,7 @@ docker compose logs -f frontend
 # Stop
 docker compose down
 
-# Stop + delete volumes (wipes nothing — no database)
+# Stop + delete volumes (WARNING: This will delete the PostgreSQL database volume and wipe tenant data!)
 docker compose down -v
 
 # Rebuild a specific service

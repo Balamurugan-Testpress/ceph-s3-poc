@@ -280,12 +280,11 @@ frontend/src/main.jsx  ──▶  <App/>
 
 ---
 
-## No Database — Why?
+## Database and Multi-Tenancy
 
-The original project used PostgreSQL + Tortoise ORM to store users, tenants, buckets, and RGW credentials. For this PoC, all of that is unnecessary:
+While the initial PoC was stateless, the project has evolved to support multi-tenancy using a PostgreSQL database (with `sqlalchemy` and `asyncpg`).
 
-- **Auth**: Admin credentials in `.env` — one user, compared directly
-- **RGW credentials**: In `.env` — one set of admin S3 keys
-- **Bucket metadata**: Fetched live from the cluster via S3 API
-
-This makes the system **stateless**: restart the container and everything works the same. No volumes, no migrations, no connection pooling.
+- **Admin Auth**: The master admin credentials (`ADMIN_USERNAME`, `ADMIN_PASSWORD`) remain in `.env` and bypass the database.
+- **Tenant Auth**: Admin can create "tenant" users. These are stored in the `users` table.
+- **RGW Credentials**: When a tenant is created, the backend provisions a unique RGW user in the Ceph cluster, extracts the `access_key` and `secret_key`, and securely stores them in the database.
+- **Quotas**: The database tracks each tenant's `quota_bytes` and `used_bytes`. When a tenant uploads a file, the FastAPI backend intercepts the request, checks the quota, and updates `used_bytes` before forwarding the object to Ceph using the tenant's specific credentials.

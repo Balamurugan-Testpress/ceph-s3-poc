@@ -19,7 +19,6 @@ from app.services.user_service import update_used_bytes
 from app.api.deps import get_current_user
 from app.services.rgw_client import RGWClient, RGWError
 from app.services.ceph_api import CephApiClient, CephApiError
-from app.services.rgw_client import RGWClient, RGWError
 
 router = APIRouter(prefix="/rgw", tags=["rgw"])
 

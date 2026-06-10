@@ -19,11 +19,16 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=LoginResponse)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    admin_user = os.getenv("ADMIN_USERNAME", "admin")
-    admin_pass = os.getenv("ADMIN_PASSWORD", "admin")
+    admin_user = os.getenv("ADMIN_USERNAME")
+    admin_pass = os.getenv("ADMIN_PASSWORD")
 
     # 1. Check if this is the admin user (from env vars)
-    if data.username == admin_user and data.password == admin_pass:
+    if (
+        admin_user
+        and admin_pass
+        and data.username == admin_user
+        and data.password == admin_pass
+    ):
         token = create_access_token(
             user_id="admin",
             username=admin_user,
