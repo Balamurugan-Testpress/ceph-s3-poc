@@ -5,6 +5,7 @@ import {
   Users,
   Database,
   Key,
+  ScrollText,
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -19,6 +20,7 @@ export default function Sidebar() {
 
   if (isAdmin) {
     navItems.push({ name: "Users", path: "/users", icon: Users });
+    navItems.push({ name: "Audit Logs", path: "/audit-logs", icon: ScrollText });
   }
 
   return (

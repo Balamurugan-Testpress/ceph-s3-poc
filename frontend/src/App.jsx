@@ -6,6 +6,7 @@ import OverviewPage from "./pages/OverviewPage";
 import BucketsPage from "./pages/BucketsPage";
 import UsersPage from "./pages/UsersPage";
 import KeysPage from "./pages/KeysPage";
+import AuditLogsPage from "./pages/AuditLogsPage";
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
         <Route path="buckets" element={<BucketsPage />} />
         <Route path="keys" element={<KeysPage />} />
         <Route path="users" element={<UsersPage />} />
+        <Route path="audit-logs" element={<AuditLogsPage />} />
       </Route>
     </Routes>
   );
