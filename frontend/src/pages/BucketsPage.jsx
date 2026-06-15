@@ -10,8 +10,8 @@ export default function BucketsPage() {
         </p>
       </div>
 
-      <div className="grid -cols3 gap-6">
-        <div className="xl:col-span-2">
+      <div>
+        <div>
           <section className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 h-full">
             <BucketExplorer />
           </section>
