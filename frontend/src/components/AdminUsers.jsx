@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
+import { X, UserPlus } from "lucide-react";
 
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
@@ -154,120 +155,213 @@ function AdminUsers() {
             </button>
           )}
           <button
-            onClick={() => setShowForm(!showForm)}
-            className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+            onClick={() => { setShowForm(true); setResult(null); }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-brand-500 text-white rounded-md hover:bg-brand-600 transition-colors font-medium"
           >
-            {showForm ? "Cancel" : "+ New User"}
+            <UserPlus className="w-4 h-4" />
+            New User
           </button>
         </div>
       </div>
 
-      {/* Create form */}
+      {/* Create User Modal */}
       {showForm && (
-        <div className="au-modal-overlay">
-          <div className="au-modal">
-            <h3>Create New User</h3>
-            <form className="au-modal-form" onSubmit={handleCreate}>
-              <div className="au-form-grid">
-                <div className="au-field">
-                  <label>Username</label>
-                  <input value={form.username} onChange={e => setForm({...form, username: e.target.value})} required />
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowForm(false); setResult(null); } }}
+        >
+          <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-9 h-9 bg-brand-500/10 rounded-lg">
+                  <UserPlus className="w-5 h-5 text-brand-500" />
                 </div>
-                <div className="au-field">
-                  <label>Password</label>
-                  <input type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
-                </div>
-                <div className="au-field" style={{ gridColumn: "1 / -1" }}>
-                  <label>Display Name</label>
-                  <input value={form.display_name} onChange={e => setForm({...form, display_name: e.target.value})} />
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900 m-0">Create New User</h2>
+                  <p className="text-xs text-gray-400 m-0">Fill in the details to provision a new account</p>
                 </div>
               </div>
+              <button
+                onClick={() => { setShowForm(false); setResult(null); }}
+                className="flex items-center justify-center w-8 h-8 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-              <fieldset className="au-fieldset">
-                <legend>
-                  <label className="au-field-checkbox">
-                    <input type="checkbox" checked={form.user_quota_enabled} onChange={e => setForm({...form, user_quota_enabled: e.target.checked})} />
-                    Enable User Quota
-                  </label>
-                </legend>
-                {form.user_quota_enabled && (
-                  <div className="au-form-grid">
-                    <div className="au-field">
-                      <label>Max Size (KB) [-1 for unlimited]</label>
-                      <input type="number" value={form.user_quota_max_size_kb} onChange={e => setForm({...form, user_quota_max_size_kb: parseInt(e.target.value) || -1})} />
-                    </div>
-                    <div className="au-field">
-                      <label>Max Objects [-1 for unlimited]</label>
-                      <input type="number" value={form.user_quota_max_objects} onChange={e => setForm({...form, user_quota_max_objects: parseInt(e.target.value) || -1})} />
-                    </div>
+            {/* Modal Body — scrollable */}
+            <div className="overflow-y-auto flex-1 px-6 py-5">
+              <form id="create-user-form" onSubmit={handleCreate} className="space-y-5">
+
+                {/* Error banner inside form */}
+                {result && !result.success && (
+                  <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                    <span className="mt-0.5">⚠</span>
+                    <span>{result.error}</span>
                   </div>
                 )}
-              </fieldset>
 
-              <fieldset className="au-fieldset">
-                <legend>
-                  <label className="au-field-checkbox">
-                    <input type="checkbox" checked={form.bucket_quota_enabled} onChange={e => setForm({...form, bucket_quota_enabled: e.target.checked})} />
-                    Enable Bucket Quota
-                  </label>
-                </legend>
-                {form.bucket_quota_enabled && (
-                  <div className="au-form-grid">
-                    <div className="au-field">
-                      <label>Max Size (KB) [-1 for unlimited]</label>
-                      <input type="number" value={form.bucket_quota_max_size_kb} onChange={e => setForm({...form, bucket_quota_max_size_kb: parseInt(e.target.value) || -1})} />
-                    </div>
-                    <div className="au-field">
-                      <label>Max Objects [-1 for unlimited]</label>
-                      <input type="number" value={form.bucket_quota_max_objects} onChange={e => setForm({...form, bucket_quota_max_objects: parseInt(e.target.value) || -1})} />
-                    </div>
+                {/* Basic Info */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-600 uppercase tracking-wide">Username <span className="text-red-500">*</span></label>
+                    <input
+                      value={form.username}
+                      onChange={e => setForm({...form, username: e.target.value})}
+                      required
+                      placeholder="e.g. john.doe"
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors placeholder:text-gray-300"
+                    />
                   </div>
-                )}
-              </fieldset>
-
-              <fieldset className="au-fieldset">
-                <legend>
-                  <label className="au-field-checkbox">
-                    <input type="checkbox" checked={form.rate_limit_enabled} onChange={e => setForm({...form, rate_limit_enabled: e.target.checked})} />
-                    Enable User Rate Limit
-                  </label>
-                </legend>
-                {form.rate_limit_enabled && (
-                  <div className="au-form-grid">
-                    <div className="au-field">
-                      <label>Max Read Ops (0 for unlimited)</label>
-                      <input type="number" value={form.rate_limit_max_read_ops} onChange={e => setForm({...form, rate_limit_max_read_ops: parseInt(e.target.value) || 0})} />
-                    </div>
-                    <div className="au-field">
-                      <label>Max Write Ops (0 for unlimited)</label>
-                      <input type="number" value={form.rate_limit_max_write_ops} onChange={e => setForm({...form, rate_limit_max_write_ops: parseInt(e.target.value) || 0})} />
-                    </div>
-                    <div className="au-field">
-                      <label>Max Read Bytes (0 for unlimited)</label>
-                      <input type="number" value={form.rate_limit_max_read_bytes} onChange={e => setForm({...form, rate_limit_max_read_bytes: parseInt(e.target.value) || 0})} />
-                    </div>
-                    <div className="au-field">
-                      <label>Max Write Bytes (0 for unlimited)</label>
-                      <input type="number" value={form.rate_limit_max_write_bytes} onChange={e => setForm({...form, rate_limit_max_write_bytes: parseInt(e.target.value) || 0})} />
-                    </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-600 uppercase tracking-wide">Password <span className="text-red-500">*</span></label>
+                    <input
+                      type="password"
+                      value={form.password}
+                      onChange={e => setForm({...form, password: e.target.value})}
+                      required
+                      placeholder="Min 8 characters"
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors placeholder:text-gray-300"
+                    />
                   </div>
-                )}
-              </fieldset>
+                  <div className="col-span-2 space-y-1.5">
+                    <label className="block text-xs font-medium text-gray-600 uppercase tracking-wide">Display Name</label>
+                    <input
+                      value={form.display_name}
+                      onChange={e => setForm({...form, display_name: e.target.value})}
+                      placeholder="Full name (optional)"
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors placeholder:text-gray-300"
+                    />
+                  </div>
+                </div>
 
-              <div className="au-modal-actions">
-                <button type="button" className="au-btn-cancel" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="au-btn-submit" disabled={creating}>
-                  {creating ? "Creating…" : "Create User"}
-                </button>
-              </div>
-            </form>
+                {/* User Quota */}
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <label className="flex items-center gap-3 px-4 py-3 bg-gray-50 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={form.user_quota_enabled}
+                      onChange={e => setForm({...form, user_quota_enabled: e.target.checked})}
+                      className="w-4 h-4 accent-brand-500 rounded cursor-pointer"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Enable User Quota</span>
+                  </label>
+                  {form.user_quota_enabled && (
+                    <div className="grid grid-cols-2 gap-4 px-4 py-4 border-t border-gray-100">
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-gray-500">Max Size (KB)<span className="text-gray-400 font-normal"> · -1 = unlimited</span></label>
+                        <input type="number" value={form.user_quota_max_size_kb} onChange={e => setForm({...form, user_quota_max_size_kb: parseInt(e.target.value) || -1})} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-gray-500">Max Objects<span className="text-gray-400 font-normal"> · -1 = unlimited</span></label>
+                        <input type="number" value={form.user_quota_max_objects} onChange={e => setForm({...form, user_quota_max_objects: parseInt(e.target.value) || -1})} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bucket Quota */}
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <label className="flex items-center gap-3 px-4 py-3 bg-gray-50 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={form.bucket_quota_enabled}
+                      onChange={e => setForm({...form, bucket_quota_enabled: e.target.checked})}
+                      className="w-4 h-4 accent-brand-500 rounded cursor-pointer"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Enable Bucket Quota</span>
+                  </label>
+                  {form.bucket_quota_enabled && (
+                    <div className="grid grid-cols-2 gap-4 px-4 py-4 border-t border-gray-100">
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-gray-500">Max Size (KB)<span className="text-gray-400 font-normal"> · -1 = unlimited</span></label>
+                        <input type="number" value={form.bucket_quota_max_size_kb} onChange={e => setForm({...form, bucket_quota_max_size_kb: parseInt(e.target.value) || -1})} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-gray-500">Max Objects<span className="text-gray-400 font-normal"> · -1 = unlimited</span></label>
+                        <input type="number" value={form.bucket_quota_max_objects} onChange={e => setForm({...form, bucket_quota_max_objects: parseInt(e.target.value) || -1})} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Rate Limit */}
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <label className="flex items-center gap-3 px-4 py-3 bg-gray-50 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={form.rate_limit_enabled}
+                      onChange={e => setForm({...form, rate_limit_enabled: e.target.checked})}
+                      className="w-4 h-4 accent-brand-500 rounded cursor-pointer"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Enable User Rate Limit</span>
+                  </label>
+                  {form.rate_limit_enabled && (
+                    <div className="grid grid-cols-2 gap-4 px-4 py-4 border-t border-gray-100">
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-gray-500">Max Read Ops<span className="text-gray-400 font-normal"> · 0 = unlimited</span></label>
+                        <input type="number" value={form.rate_limit_max_read_ops} onChange={e => setForm({...form, rate_limit_max_read_ops: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-gray-500">Max Write Ops<span className="text-gray-400 font-normal"> · 0 = unlimited</span></label>
+                        <input type="number" value={form.rate_limit_max_write_ops} onChange={e => setForm({...form, rate_limit_max_write_ops: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-gray-500">Max Read Bytes<span className="text-gray-400 font-normal"> · 0 = unlimited</span></label>
+                        <input type="number" value={form.rate_limit_max_read_bytes} onChange={e => setForm({...form, rate_limit_max_read_bytes: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-medium text-gray-500">Max Write Bytes<span className="text-gray-400 font-normal"> · 0 = unlimited</span></label>
+                        <input type="number" value={form.rate_limit_max_write_bytes} onChange={e => setForm({...form, rate_limit_max_write_bytes: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+              </form>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
+              <button
+                type="button"
+                onClick={() => { setShowForm(false); setResult(null); }}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                form="create-user-form"
+                disabled={creating}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              >
+                {creating ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                    Creating…
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4" />
+                    Create User
+                  </>
+                )}
+              </button>
+            </div>
+
           </div>
         </div>
       )}
 
-      {/* Error */}
-      {result && !result.success && (
-        <div className="text-red-600 bg-red-100 p-2 mb-2 rounded text-sm">{result.error}</div>
+      {/* Error (shown outside modal only when modal is closed) */}
+      {result && !result.success && !showForm && (
+        <div className="flex items-start gap-2 p-3 mb-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          <span className="mt-0.5">⚠</span>
+          <span>{result.error}</span>
+        </div>
       )}
 
       {/* Keys reveal */}
