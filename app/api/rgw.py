@@ -74,10 +74,29 @@ async def list_buckets(current_user: dict = Depends(get_current_user)):
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # Tenant — list only their own buckets via S3
+    # Tenant — list own buckets via S3 with size computation
     try:
         client = _get_user_client(current_user)
-        return {"buckets": client.list_buckets()}
+        raw = client.list_buckets()
+        buckets = []
+        for b in raw:
+            try:
+                objs = client.list_all_objects(b["name"])
+                total_size = sum(o["size"] for o in objs["objects"])
+                buckets.append({
+                    "name": b["name"],
+                    "creation_date": b.get("creation_date", ""),
+                    "object_count": objs["total_count"],
+                    "size_bytes": total_size,
+                })
+            except RGWError:
+                buckets.append({
+                    "name": b["name"],
+                    "creation_date": b.get("creation_date", ""),
+                    "object_count": 0,
+                    "size_bytes": 0,
+                })
+        return {"buckets": buckets}
     except RGWError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
