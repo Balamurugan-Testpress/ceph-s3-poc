@@ -207,18 +207,18 @@ class RGWAdminOpsClient:
             logger.error("create_key(%s) failed: %s", uid, exc)
             raise
 
-    async def delete_key(self, access_key: str) -> bool:
-        """Delete a specific S3 access key."""
+    async def delete_key(self, uid: str, access_key: str) -> bool:
+        """Delete a specific S3 access key for a user."""
         try:
-            # We must pass the access-key parameter
             await self._request("DELETE", "/admin/user", {
+                "uid": uid,
                 "key": "",
                 "access-key": access_key,
                 "format": "json"
             })
             return True
         except RGWAdminOpsError as exc:
-            logger.error("delete_key(%s) failed: %s", access_key, exc)
+            logger.error("delete_key(%s, %s) failed: %s", uid, access_key, exc)
             raise
 
     # ── Buckets ───────────────────────────────────────────────────

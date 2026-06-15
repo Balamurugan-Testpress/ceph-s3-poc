@@ -247,14 +247,13 @@ async def list_my_keys(
     current_user: dict = Depends(get_current_user),
 ):
     """List all S3 keys for the current user."""
-    uid = current_user.get("id")
+    uid = current_user.get("rgw_user_id")
     if not uid:
         return {"keys": []}
 
     try:
         from app.services.rgw_admin import get_rgw_user
         rgw_user = await get_rgw_user(uid)
-        print(rgw_user)
         if not rgw_user:
             return {"keys": []}
         return {"keys": rgw_user.get("keys", [])}
@@ -267,8 +266,7 @@ async def generate_new_key(
     current_user: dict = Depends(get_current_user),
 ):
     """Generate a new S3 credential pair."""
-    print(current_user)
-    uid = current_user.get("id")
+    uid = current_user.get("rgw_user_id")
     if not uid:
         raise HTTPException(status_code=400, detail="Cannot generate keys for this user")
 
@@ -287,7 +285,7 @@ async def delete_key(
     current_user: dict = Depends(get_current_user),
 ):
     """Delete an S3 credential pair."""
-    uid = current_user.get("id")
+    uid = current_user.get("rgw_user_id")
     if not uid:
         raise HTTPException(status_code=400, detail="Invalid user")
     
@@ -298,7 +296,7 @@ async def delete_key(
     try:
         from app.services.rgw_admin_ops import RGWAdminOpsClient
         client = RGWAdminOpsClient()
-        await client.delete_key(access_key)
+        await client.delete_key(uid, access_key)
         return {"deleted": True}
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

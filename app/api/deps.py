@@ -45,6 +45,7 @@ async def get_current_user(
             "display_name": payload.get("display_name", "Administrator"),
             "quota_bytes": 0,
             "used_bytes": 0,
+            "rgw_user_id": ADMIN_ID,
             "rgw_access_key": None,  # will use env var
             "rgw_secret_key": None,  # will use env var
         }
@@ -66,6 +67,7 @@ async def get_current_user(
         "display_name": user.display_name or user.username,
         "quota_bytes": user.quota_bytes,
         "used_bytes": user.used_bytes,
+        "rgw_user_id": user.rgw_user_id,
         "rgw_access_key": user.rgw_access_key,
         "rgw_secret_key": user.rgw_secret_key,
     }
