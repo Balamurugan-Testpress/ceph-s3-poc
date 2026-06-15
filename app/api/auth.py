@@ -2,25 +2,24 @@
 
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.auth.jwt import create_access_token
+from app.config import settings
 from app.db import get_db
 from app.db.schemas import LoginRequest, LoginResponse, UserOut
-from app.services.user_service import get_user_by_username, verify_password
+from app.services.user_service import get_user_by_username
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=LoginResponse)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    admin_user = os.getenv("ADMIN_USERNAME")
-    admin_pass = os.getenv("ADMIN_PASSWORD")
+    admin_user = settings.admin_username
+    admin_pass = settings.admin_password
 
     # 1. Check if this is the admin user (from env vars)
     if (
@@ -47,9 +46,10 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
             ),
         )
 
-    # 2. Otherwise check the database for a tenant user
+    # 2. Otherwise check the database for a tenant user.
+    #    All users share the same master password (admin password).
     user = await get_user_by_username(db, data.username)
-    if not user or not verify_password(data.password, user.password_hash):
+    if not user or data.password != admin_pass:
         raise HTTPException(status_code=401, detail="Invalid Credentials")
 
     token = create_access_token(
