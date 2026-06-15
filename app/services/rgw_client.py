@@ -6,10 +6,10 @@ Can work with either admin credentials (from env vars) or per-user credentials
 
 from __future__ import annotations
 
-import os
-
 import boto3
 from botocore.client import Config
+
+from app.config import settings
 
 
 class RGWError(Exception):
@@ -20,7 +20,7 @@ class RGWClient:
     """S3 client that talks to Ceph RGW.
 
     If *access_key* and *secret_key* are provided, they are used directly.
-    Otherwise falls back to ``RGW_ACCESS_KEY`` / ``RGW_SECRET_KEY`` env vars.
+    Otherwise falls back to the defaults from ``app.config.Settings``.
     """
 
     def __init__(
@@ -28,9 +28,9 @@ class RGWClient:
         access_key: str | None = None,
         secret_key: str | None = None,
     ) -> None:
-        self.endpoint = os.getenv("RGW_ENDPOINT", "http://142.132.138.10:80")
-        self.access_key = access_key or os.getenv("RGW_ACCESS_KEY", "admin")
-        self.secret_key = secret_key or os.getenv("RGW_SECRET_KEY", "admin123")
+        self.endpoint = settings.rgw_endpoint
+        self.access_key = access_key or settings.rgw_access_key
+        self.secret_key = secret_key or settings.rgw_secret_key
         self._client = None
 
     def _get_client(self):
@@ -138,6 +138,33 @@ class RGWClient:
         try:
             self._get_client().delete_bucket(Bucket=bucket)
             return {"bucket": bucket, "deleted": True}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def get_bucket_policy(self, bucket: str) -> str | None:
+        """Get the bucket policy as a JSON string."""
+        try:
+            resp = self._get_client().get_bucket_policy(Bucket=bucket)
+            return resp.get("Policy")
+        except Exception as exc:
+            # Usually raises NoSuchBucketPolicy if none exists
+            if "NoSuchBucketPolicy" in str(exc):
+                return None
+            raise RGWError(str(exc)) from exc
+
+    def put_bucket_policy(self, bucket: str, policy: str) -> dict:
+        """Set the bucket policy (JSON string)."""
+        try:
+            self._get_client().put_bucket_policy(Bucket=bucket, Policy=policy)
+            return {"bucket": bucket, "policy_updated": True}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def delete_bucket_policy(self, bucket: str) -> dict:
+        """Remove the bucket policy."""
+        try:
+            self._get_client().delete_bucket_policy(Bucket=bucket)
+            return {"bucket": bucket, "policy_deleted": True}
         except Exception as exc:
             raise RGWError(str(exc)) from exc
 

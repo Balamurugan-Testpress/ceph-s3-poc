@@ -50,6 +50,8 @@ class UserOut(BaseModel):
     quota_bytes: int = 0
     used_bytes: int = 0
     rgw_user_id: str | None = None
+    rgw_access_key: str | None = None
+    bucket_count: int = 0
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}

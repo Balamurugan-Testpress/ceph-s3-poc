@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import bcrypt
@@ -94,15 +95,24 @@ async def update_used_bytes(db: AsyncSession, user_id: uuid.UUID, delta: int) ->
 
 async def recalculate_usage(db: AsyncSession, user_id: uuid.UUID, rgw_client) -> int:
     """Scan all objects across all buckets and update used_bytes.
-    Returns the recalculated total."""
-    total = 0
-    buckets = rgw_client.list_buckets()
-    for b in buckets:
-        while True:
-            objs = rgw_client.list_objects(b["name"], max_keys=1000)
-            total += sum(obj["size"] for obj in objs["objects"])
-            if not objs["is_truncated"]:
-                break
+
+    The S3 scanning (potentially slow) runs in a thread to avoid
+    blocking the async event loop.  Returns the recalculated total.
+    """
+    def _scan_all_objects() -> int:
+        total = 0
+        buckets = rgw_client.list_buckets()
+        for b in buckets:
+            token = None
+            while True:
+                objs = rgw_client.list_objects(b["name"], max_keys=1000, continuation_token=token)
+                total += sum(obj["size"] for obj in objs["objects"])
+                if not objs["is_truncated"]:
+                    break
+                token = objs["next_token"]
+        return total
+
+    total = await asyncio.to_thread(_scan_all_objects)
 
     user = await get_user_by_id(db, user_id)
     if user:
