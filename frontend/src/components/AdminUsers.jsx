@@ -24,6 +24,7 @@ function AdminUsers() {
   const [selected, setSelected] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
   const [editQuota, setEditQuota] = useState(null);
+  const [resyncing, setResyncing] = useState(null); // user ID being resynced
 
   const loadUsers = useCallback(async () => {
     try {
@@ -104,6 +105,19 @@ function AdminUsers() {
     } catch (err) {
       alert(err.message);
     }
+  }
+
+  async function handleResync(userId) {
+    if (!confirm("Re-create this user in Ceph RGW? Their existing S3 keys will be replaced with new ones.")) return;
+    setResyncing(userId);
+    try {
+      const resp = await apiFetch(`/api/admin/users/${userId}/resync-rgw`, { method: "POST" });
+      alert(`RGW user recreated.\n\nNew Access Key: ${resp.rgw_access_key}\nNew Secret Key: ${resp.rgw_secret_key}\n\nSave these credentials!`);
+      loadUsers();
+    } catch (err) {
+      alert(`Resync failed: ${err.message}`);
+    }
+    setResyncing(null);
   }
 
   function startEditQuota(user) {
@@ -387,12 +401,23 @@ function AdminUsers() {
                     </td>
                     <td className="p-2 text-xs text-gray-500">{u.created_at?.slice(0, 10)}</td>
                     <td className="p-2">
-                      <button
-                        onClick={() => handleDelete(u.id)}
-                        className="px-2 py-1 bg-red-600 text-white rounded text-xs cursor-pointer hover:bg-red-700"
-                      >
-                        Delete
-                      </button>
+                      <div className="flex gap-1">
+                        {u.rgw_user_id && u.id !== "admin" && (
+                          <button
+                            onClick={() => handleResync(u.id)}
+                            disabled={resyncing === u.id}
+                            className="px-2 py-1 bg-amber-500 text-white rounded text-xs cursor-pointer hover:bg-amber-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {resyncing === u.id ? "Resyncing…" : "Resync"}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDelete(u.id)}
+                          className="px-2 py-1 bg-red-600 text-white rounded text-xs cursor-pointer hover:bg-red-700"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

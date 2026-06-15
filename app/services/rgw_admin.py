@@ -81,16 +81,10 @@ async def list_rgw_users() -> list[dict]:
 async def get_rgw_user(uid: str, stats: bool = False) -> dict | None:
     """Fetch a single RGW user from Ceph (Admin Ops API, then Dashboard)."""
     try:
-        print("Enter the get_rgw_user")
         client = RGWAdminOpsClient()
-        print(client)
         user = await client.get_user(uid, stats=stats)
-        print(user)
         if user:
             return user
-        else:
-            print("NO USER")
-            return
     except RGWAdminOpsError:
         pass
 

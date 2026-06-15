@@ -510,3 +510,67 @@ async def recalculate_user_usage(
 
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/users/{user_id}/resync-rgw")
+async def resync_rgw_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """Re-create the Ceph RGW user and update stored credentials.
+
+    Use this when a tenant user's RGW user was lost (e.g. RGW data reset)
+    and they get ``InvalidAccessKeyId`` errors on S3 operations.
+    """
+    # ── Admin user (virtual, no RGW user to resync) ──
+    if user_id == "admin":
+        raise HTTPException(status_code=400, detail="Admin user has no RGW user to resync")
+
+    # ── DB user ──
+    uid = uuid.UUID(user_id)
+    user = await get_user_by_id(db, uid)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not user.rgw_user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="User has no RGW user ID — they may need to be re-created",
+        )
+
+    try:
+        rgw_resp = await create_rgw_user(
+            uid=user.rgw_user_id,
+            display_name=user.display_name or user.username,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to recreate RGW user in Ceph: {exc}",
+        )
+
+    keys = extract_rgw_keys(rgw_resp)
+    if not keys:
+        raise HTTPException(
+            status_code=502,
+            detail="RGW user created but Ceph returned no keys",
+        )
+
+    access_key, secret_key = keys
+    updated = await update_rgw_creds(db, uid, user.rgw_user_id, access_key, secret_key)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update stored credentials")
+
+    await log_action(
+        db,
+        admin,
+        "RESYNC_RGW_USER",
+        {"username": user.username, "rgw_user_id": user.rgw_user_id},
+    )
+
+    return {
+        "message": f"RGW user '{user.rgw_user_id}' recreated with new credentials",
+        "rgw_access_key": access_key,
+        "rgw_secret_key": secret_key,
+    }
