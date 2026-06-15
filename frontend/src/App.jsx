@@ -5,7 +5,6 @@ import LoginPage from "./pages/LoginPage";
 import OverviewPage from "./pages/OverviewPage";
 import BucketsPage from "./pages/BucketsPage";
 import UsersPage from "./pages/UsersPage";
-import ClusterPage from "./pages/ClusterPage";
 import KeysPage from "./pages/KeysPage";
 
 function App() {
@@ -24,7 +23,6 @@ function App() {
         <Route path="buckets" element={<BucketsPage />} />
         <Route path="keys" element={<KeysPage />} />
         <Route path="users" element={<UsersPage />} />
-        <Route path="cluster" element={<ClusterPage />} />
       </Route>
     </Routes>
   );

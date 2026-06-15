@@ -2,7 +2,6 @@ import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import {
   LayoutDashboard,
-  HardDrive,
   Users,
   Database,
   Key,
@@ -20,7 +19,6 @@ export default function Sidebar() {
 
   if (isAdmin) {
     navItems.push({ name: "Users", path: "/users", icon: Users });
-    navItems.push({ name: "Cluster", path: "/cluster", icon: HardDrive });
   }
 
   return (

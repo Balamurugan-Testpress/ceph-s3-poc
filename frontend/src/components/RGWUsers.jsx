@@ -7,6 +7,8 @@ function RGWUsers() {
   const [error, setError] = useState(null);
   const [importing, setImporting] = useState(null); // uid being imported
   const [importResult, setImportResult] = useState(null);
+  const [importingAll, setImportingAll] = useState(false);
+  const [importAllResult, setImportAllResult] = useState(null);
 
   const fetchRGWUsers = useCallback(async () => {
     setLoading(true);
@@ -43,6 +45,23 @@ function RGWUsers() {
     setImporting(null);
   }
 
+  async function handleImportAll() {
+    if (!confirm("Import ALL un-imported RGW users into the app database?")) return;
+    setImportingAll(true);
+    setImportAllResult(null);
+    try {
+      const data = await apiFetch("/api/admin/rgw-users/import-all", {
+        method: "POST",
+      });
+      setImportAllResult(data);
+      // Refresh the list
+      fetchRGWUsers();
+    } catch (err) {
+      setImportAllResult({ error: err.message });
+    }
+    setImportingAll(false);
+  }
+
   const dbUsernames = new Set(
     // We'll populate this from the activity log or just show all
   );
@@ -54,13 +73,22 @@ function RGWUsers() {
         <p className="text-sm text-gray-500">
           RGW users already present in Ceph. Import them into the app database so they can log into the dashboard.
         </p>
-        <button
-          onClick={fetchRGWUsers}
-          disabled={loading}
-          className="px-3 py-1.5 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-60 transition-colors"
-        >
-          {loading ? "Refreshing…" : "Refresh"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleImportAll}
+            disabled={importingAll || loading}
+            className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60 transition-colors"
+          >
+            {importingAll ? "Importing All…" : "Import All"}
+          </button>
+          <button
+            onClick={fetchRGWUsers}
+            disabled={loading}
+            className="px-3 py-1.5 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-60 transition-colors"
+          >
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </div>
 
       {/* Import result toast */}
@@ -90,6 +118,41 @@ Secret Key:    {importResult.data.rgw_secret_key}
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {/* Import All result summary */}
+      {importAllResult && (
+        <div className={`p-3 rounded text-sm border ${
+          importAllResult.error
+            ? "bg-red-50 border-red-300 text-red-700"
+            : "bg-green-50 border-green-300 text-green-800"
+        }`}>
+          {importAllResult.error ? (
+            <span>Import All failed: {importAllResult.error}</span>
+          ) : (
+            <div className="flex items-center justify-between">
+              <span>
+                <strong>✓ Imported {importAllResult.imported} of {importAllResult.total} user(s)</strong>
+                {importAllResult.results?.filter(r => r.status === "skipped").length > 0 && (
+                  <span className="ml-2 text-gray-500">
+                    ({importAllResult.results.filter(r => r.status === "skipped").length} skipped)
+                  </span>
+                )}
+                {importAllResult.results?.filter(r => r.status === "error").length > 0 && (
+                  <span className="ml-2 text-red-500">
+                    ({importAllResult.results.filter(r => r.status === "error").length} failed)
+                  </span>
+                )}
+              </span>
+              <button
+                onClick={() => setImportAllResult(null)}
+                className="text-xs underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
         </div>
       )}
 

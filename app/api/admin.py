@@ -323,11 +323,11 @@ async def update_quota(
     user = await get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    user.quota_bytes = data.quota_mb * 1_048_576
+    user.quota_bytes = max(0, data.quota_mb * 1_048_576) if data.quota_mb > 0 else 0
     await db.commit()
 
     # Sync quota to Ceph (native S3-level enforcement)
-    if user.rgw_user_id:
+    if user.rgw_user_id and data.quota_mb > 0:
         try:
             from app.services.rgw_admin import set_rgw_quota
 
@@ -460,6 +460,96 @@ async def import_rgw_user(
         "rgw_access_key": access_key,
         "rgw_secret_key": secret_key,
     }
+
+
+@router.post("/rgw-users/import-all")
+async def import_all_rgw_users(
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """Import all un-imported Ceph RGW users into the application database.
+
+    Iterates over every RGW user not yet in the DB and imports them.
+    Returns a summary of successes and failures.
+    """
+    from app.services.user_service import (
+        create_user as _create_user,
+        get_user_by_username,
+    )
+
+    import secrets
+
+    # Fetch all RGW users
+    try:
+        raw_users = await list_rgw_users()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to list RGW users: {exc}")
+
+    users = [u for u in raw_users if isinstance(u, dict)]
+
+    # Find already-imported UIDs
+    imported_uids = set()
+    try:
+        stmt = select(User.rgw_user_id).where(User.rgw_user_id.isnot(None))
+        result = await db.execute(stmt)
+        imported_uids = {row[0] for row in result if row[0]}
+    except Exception:
+        pass
+
+    results = []
+    for u in users:
+        uid = u.get("user_id", u.get("uid", ""))
+        if uid in imported_uids:
+            results.append({"uid": uid, "status": "skipped", "reason": "already imported"})
+            continue
+
+        keys = extract_rgw_keys(u)
+        if not keys:
+            results.append({"uid": uid, "status": "skipped", "reason": "no S3 keys"})
+            continue
+
+        access_key, secret_key = keys
+        display_name = u.get("display_name", uid)
+        username = uid.replace(" ", "_").replace(".", "-")[:100]
+
+        # Avoid duplicate usernames
+        existing = await get_user_by_username(db, username)
+        if existing:
+            suffix = 2
+            while await get_user_by_username(db, f"{username}-{suffix}"):
+                suffix += 1
+            username = f"{username}-{suffix}"
+
+        temp_password = secrets.token_urlsafe(12)
+
+        try:
+            user = await _create_user(
+                db,
+                username=username,
+                password=temp_password,
+                display_name=display_name,
+                quota_mb=0,  # unlimited by default
+                rgw_user_id=uid,
+                rgw_access_key=access_key,
+                rgw_secret_key=secret_key,
+            )
+            results.append({
+                "uid": uid,
+                "status": "imported",
+                "username": username,
+                "temp_password": temp_password,
+            })
+        except Exception as exc:
+            results.append({"uid": uid, "status": "error", "detail": str(exc)[:200]})
+
+    await log_action(
+        db,
+        admin,
+        "IMPORT_ALL_RGW_USERS",
+        {"imported": sum(1 for r in results if r["status"] == "imported"), "total": len(results)},
+    )
+
+    return {"results": results, "total": len(results), "imported": sum(1 for r in results if r["status"] == "imported")}
 
 
 @router.post("/users/{user_id}/recalculate-usage")

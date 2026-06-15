@@ -65,7 +65,7 @@ async def upload_object(
         if uid:
             used = current_user.get("used_bytes", 0)
             quota = current_user.get("quota_bytes", 0)
-            if used + len(contents) > quota:
+            if quota > 0 and used + len(contents) > quota:
                 raise HTTPException(
                     status_code=413,
                     detail=f"Quota exceeded: {used + len(contents)} > {quota} bytes",

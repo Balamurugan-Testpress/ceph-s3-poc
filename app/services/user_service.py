@@ -44,7 +44,7 @@ async def create_user(
         username=username,
         password_hash=hash_password(password),
         display_name=display_name or username,
-        quota_bytes=quota_mb * 1_048_576,
+        quota_bytes=max(0, quota_mb * 1_048_576) if quota_mb > 0 else 0,
         rgw_user_id=rgw_user_id,
         rgw_access_key=rgw_access_key,
         rgw_secret_key=rgw_secret_key,
