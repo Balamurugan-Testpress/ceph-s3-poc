@@ -34,11 +34,12 @@ async def create_bucket(
 
 
 @router.delete("/buckets/{bucket}")
-async def delete_bucket(
+async def delete_bucket_endpoint(
     bucket: str,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Delete an empty bucket."""
     try:
         client = _get_user_client(current_user)
         result = client.delete_bucket(bucket)
@@ -89,14 +90,82 @@ async def upload_object(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.get("/buckets/{bucket}/policy")
+async def get_bucket_policy(
+    bucket: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        client = _get_user_client(current_user)
+        policy = client.get_bucket_policy(bucket)
+        return {"policy": policy}
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+from pydantic import BaseModel
+class PutPolicyRequest(BaseModel):
+    policy: str
+
+
+@router.put("/buckets/{bucket}/policy")
+async def put_bucket_policy(
+    bucket: str,
+    data: PutPolicyRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        client = _get_user_client(current_user)
+        result = client.put_bucket_policy(bucket, data.policy)
+        return result
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.delete("/buckets/{bucket}/policy")
+async def delete_bucket_policy(
+    bucket: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        client = _get_user_client(current_user)
+        result = client.delete_bucket_policy(bucket)
+        return result
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @router.get("/usage")
 async def get_usage(
     current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Return current user's usage and quota."""
+    uid = current_user.get("rgw_user_id")
+    used_bytes = current_user.get("used_bytes", 0)
+    
+    if uid and uid != "admin":
+        try:
+            from app.services.rgw_admin import get_rgw_user
+            rgw_user = await get_rgw_user(uid, stats=True)
+            if rgw_user and "stats" in rgw_user:
+                # "size_actual" and "size" are in bytes. "size_kb" is in KB.
+                stats = rgw_user["stats"]
+                used_bytes = stats.get("size_actual", stats.get("size", stats.get("size_kb", 0) * 1024))
+                
+                # Update our DB cache in the background
+                from app.services.user_service import get_user_by_id
+                db_user = await get_user_by_id(db, uuid.UUID(current_user["id"]))
+                if db_user:
+                    db_user.used_bytes = used_bytes
+                    await db.commit()
+        except Exception:
+            pass # Fallback to cached used_bytes
+
     return {
-        "used_bytes": current_user.get("used_bytes", 0),
+        "used_bytes": used_bytes,
         "quota_bytes": current_user.get("quota_bytes", 0),
+        "is_admin": current_user.get("id") == "admin" or current_user.get("role") == "admin",
     }
 
 
