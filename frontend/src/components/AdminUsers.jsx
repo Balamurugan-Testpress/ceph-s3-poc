@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
-import "./AdminUsers.css";
 
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
@@ -24,7 +23,7 @@ function AdminUsers() {
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
-  const [editQuota, setEditQuota] = useState(null); // {id, username, value}
+  const [editQuota, setEditQuota] = useState(null);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -36,6 +35,8 @@ function AdminUsers() {
 
   useEffect(() => {
     loadUsers();
+    const interval = setInterval(loadUsers, 60000);
+    return () => clearInterval(interval);
   }, [loadUsers]);
 
   async function handleCreate(e) {
@@ -124,21 +125,30 @@ function AdminUsers() {
   }
 
   return (
-    <div className="admin-users">
-      <div className="au-header">
-        <h3>Users</h3>
-        <div className="au-header-actions">
+    <div className="mt-2">
+      {/* Header */}
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="m-0 text-sm text-gray-500 font-medium">Users</h3>
+        <div className="flex gap-2 items-center">
           {selected.size > 0 && (
-            <button className="au-bulk-del-btn" onClick={handleBulkDelete} disabled={deleting}>
+            <button
+              onClick={handleBulkDelete}
+              disabled={deleting}
+              className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
               {deleting ? "Deleting…" : `Delete ${selected.size}`}
             </button>
           )}
-          <button className="au-create-btn" onClick={() => setShowForm(!showForm)}>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+          >
             {showForm ? "Cancel" : "+ New User"}
           </button>
         </div>
       </div>
 
+      {/* Create form */}
       {showForm && (
         <div className="au-modal-overlay">
           <div className="au-modal">
@@ -241,81 +251,155 @@ function AdminUsers() {
         </div>
       )}
 
-      {result && !result.success && <div className="au-error">{result.error}</div>}
+      {/* Error */}
+      {result && !result.success && (
+        <div className="text-red-600 bg-red-100 p-2 mb-2 rounded text-sm">{result.error}</div>
+      )}
+
+      {/* Keys reveal */}
       {result?.success && result.data?.rgw_access_key && (
-        <div className="au-keys-reveal">
+        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-400 rounded text-sm">
           <strong>RGW Credentials — save these!</strong>
-          <pre>
-            Access Key: {result.data.rgw_access_key}
+          <pre className="mt-2 mb-0 font-mono bg-white p-2 rounded whitespace-pre-wrap text-xs">
+            Access Key: {result.data.rgw_access_key}{"\n"}
             Secret Key: {result.data.rgw_secret_key}
           </pre>
         </div>
       )}
 
-      {loading && <div className="au-loading">Loading users…</div>}
-      {!loading && users.length === 0 && <p className="au-empty">No users yet</p>}
+      {/* Loading / empty */}
+      {loading && <div className="text-gray-400 italic py-2 text-sm">Loading users…</div>}
+      {!loading && users.length === 0 && <p className="text-gray-400 italic text-sm">No users yet</p>}
 
+      {/* User table */}
       {users.length > 0 && (
-        <table className="au-table">
-          <thead>
-            <tr>
-              <th>
-                <input type="checkbox" onChange={toggleAll} checked={selected.size === users.length && users.length > 0} />
-              </th>
-              <th>Username</th>
-              <th>Display Name</th>
-              <th>Quota</th>
-              <th>Used</th>
-              <th>RGW Sync</th>
-              <th>Created</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id} className={selected.has(u.id) ? "au-row-selected" : ""}>
-                <td>
-                  <input type="checkbox" checked={selected.has(u.id)} onChange={() => toggleSelect(u.id)} />
-                </td>
-                <td>{u.username}</td>
-                <td>{u.display_name}</td>
-                <td>
-                  {editQuota && editQuota.id === u.id ? (
-                    <span className="au-quota-edit">
-                      <input
-                        type="number"
-                        min="1"
-                        value={editQuota.value}
-                        onChange={(e) => setEditQuota({ ...editQuota, value: parseInt(e.target.value) || 1 })}
-                        autoFocus
-                      />
-                      <span className="au-qe-unit"> MB</span>
-                      <button className="au-qe-save" onClick={saveQuota}>✓</button>
-                      <button className="au-qe-cancel" onClick={() => setEditQuota(null)}>✕</button>
-                    </span>
-                  ) : (
-                    <span className="au-quota-display">
-                      {formatBytes(u.quota_bytes)}
-                      <button className="au-qe-btn" onClick={() => startEditQuota(u)} title="Edit quota">✎</button>
-                    </span>
-                  )}
-                </td>
-                <td>{formatBytes(u.used_bytes)}</td>
-                <td>
-                  {u.rgw_user_id ? (
-                    <span className="au-synced" title={`RGW user: ${u.rgw_user_id}`}>✓ synced</span>
-                  ) : (
-                    <span className="au-unsynced">✗ not synced</span>
-                  )}
-                </td>
-                <td>{u.created_at?.slice(0, 10)}</td>
-                <td>
-                  <button className="au-delete-btn" onClick={() => handleDelete(u.id)}>Delete</button>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="text-left text-gray-600 font-semibold border-b-2 border-gray-300">
+                <th className="p-2">
+                  <input
+                    type="checkbox"
+                    onChange={toggleAll}
+                    checked={selected.size === users.length && users.length > 0}
+                    className="m-0 cursor-pointer"
+                  />
+                </th>
+                <th className="p-2 whitespace-nowrap">Username</th>
+                <th className="p-2 whitespace-nowrap">Display Name</th>
+                <th className="p-2 whitespace-nowrap">Usage</th>
+                <th className="p-2 whitespace-nowrap">Buckets</th>
+                <th className="p-2 whitespace-nowrap">RGW Sync</th>
+                <th className="p-2 whitespace-nowrap">Created</th>
+                <th className="p-2"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {users.map((u) => {
+                const used = u.used_bytes || 0;
+                const rawQuota = u.quota_bytes;
+                const isUnlimited = rawQuota <= 0;
+                const quota = isUnlimited ? 1 : rawQuota; // prevent div by zero for math
+                const pct = isUnlimited ? 0 : Math.min(100, (used / quota) * 100);
+                const barColor = pct > 90 ? "bg-red-500" : pct > 70 ? "bg-yellow-400" : "bg-blue-500";
+                return (
+                  <tr
+                    key={u.id}
+                    className={`border-b border-gray-200 hover:bg-gray-50 ${
+                      selected.has(u.id) ? "bg-yellow-100 !bg-yellow-100" : ""
+                    }`}
+                  >
+                    <td className="p-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(u.id)}
+                        onChange={() => toggleSelect(u.id)}
+                        className="m-0 cursor-pointer"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <span className="font-medium">{u.username}</span>
+                    </td>
+                    <td className="p-2 text-gray-600">{u.display_name}</td>
+                    <td className="p-2 min-w-[200px]">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          {!isUnlimited && (
+                            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${barColor} rounded-full transition-all`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          )}
+                          <div className={`flex justify-between items-center w-full text-xs text-gray-400 ${isUnlimited ? '' : 'mt-0.5'}`}>
+                            <span className="inline-flex items-center gap-1">
+                              <span className="font-medium text-gray-700">{formatBytes(used)}</span>
+                              {isUnlimited && <span> used</span>}
+                            </span>
+                            <span>
+                              {editQuota && editQuota.id === u.id ? (
+                                <span className="inline-flex items-center gap-0.5">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={editQuota.value}
+                                    onChange={(e) => setEditQuota({ ...editQuota, value: parseInt(e.target.value) || 0 })}
+                                    autoFocus
+                                    className="w-14 px-1 py-0.5 border border-blue-500 rounded text-xs text-right"
+                                  />
+                                  <span className="text-gray-400">MB (0=unlimited)</span>
+                                  <button onClick={saveQuota} className="px-1 py-0.5 bg-green-600 text-white rounded text-xs cursor-pointer hover:bg-green-700 leading-none">✓</button>
+                                  <button onClick={() => setEditQuota(null)} className="px-1 py-0.5 bg-red-600 text-white rounded text-xs cursor-pointer hover:bg-red-700 leading-none">✕</button>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1">
+                                  {isUnlimited ? (
+                                    <span className="italic text-gray-400">No limit</span>
+                                  ) : (
+                                    formatBytes(quota)
+                                  )}
+                                  <button
+                                    onClick={() => startEditQuota(u)}
+                                    title="Edit quota"
+                                    className="p-0 border-0 bg-transparent cursor-pointer text-gray-300 hover:text-blue-600 text-xs"
+                                  >
+                                    ✎
+                                  </button>
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-2">
+                      <span className="text-xs text-gray-600">{u.bucket_count ?? "?"}</span>
+                    </td>
+                    <td className="p-2">
+                      {u.rgw_user_id ? (
+                        <span className="text-green-600 text-xs" title={`RGW user: ${u.rgw_user_id}`}>
+                          ✓ synced
+                        </span>
+                      ) : (
+                        <span className="text-red-600 text-xs">✗ not synced</span>
+                      )}
+                    </td>
+                    <td className="p-2 text-xs text-gray-500">{u.created_at?.slice(0, 10)}</td>
+                    <td className="p-2">
+                      <button
+                        onClick={() => handleDelete(u.id)}
+                        className="px-2 py-1 bg-red-600 text-white rounded text-xs cursor-pointer hover:bg-red-700"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

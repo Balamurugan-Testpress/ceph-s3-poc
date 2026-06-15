@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import "./QuotaUsage.css";
 
 function formatBytes(bytes) {
   if (bytes === 0 || bytes === null || bytes === undefined) return "0 B";
@@ -27,46 +26,41 @@ function QuotaUsage() {
     } catch (_) {}
   }, []);
 
-  // Refresh after uploads/deletes (poll every 3s during active use)
   useEffect(() => {
-    const interval = setInterval(refresh, 3000);
+    const interval = setInterval(refresh, 10000);
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const pct = Math.min(100, (used / quota) * 100);
-  const barClass = pct > 90 ? "qo-bar danger" : pct > 70 ? "qo-bar warn" : "qo-bar";
-
-  async function handleRecalc() {
-    setRecalc(true);
-    setRecalcMsg(null);
-    try {
-      const data = await apiFetch("/api/s3/recalculate-usage", { method: "POST" });
-      setUsed(data.used_bytes);
-      if (data.quota_bytes !== undefined) setQuota(data.quota_bytes);
-      setRecalcMsg(`Recalculated: ${formatBytes(data.used_bytes)} used`);
-    } catch (err) {
-      setRecalcMsg(`Error: ${err.message}`);
-    }
-    setRecalc(false);
-  }
+  const isUnlimited = quota <= 0;
+  const pct = isUnlimited ? 0 : Math.min(100, (used / quota) * 100);
+  const barColor = pct > 90 ? "bg-red-500" : pct > 70 ? "bg-yellow-400" : "bg-blue-500";
 
   return (
-    <div className="quota-usage">
-      <div className="qo-header">
-        <h3>Storage Quota</h3>
-        <button className="qo-recalc-btn" onClick={handleRecalc} disabled={recalc}>
-          {recalc ? "Scanning…" : "Recalculate"}
-        </button>
+    <div className="max-w-md">
+      <div className="flex justify-between items-center mb-2">
+        <h3 className="m-0 text-sm text-gray-500 font-medium">Storage Quota</h3>
       </div>
-      <div className={barClass}>
-        <div className="qo-fill" style={{ width: `${pct}%` }} />
+
+      <div className="h-5 bg-gray-200 rounded-full overflow-hidden">
+        <div
+          className={`h-full ${barColor} rounded-full transition-all duration-300`}
+          style={{ width: `${pct}%` }}
+        />
       </div>
-      <div className="qo-labels">
-        <span className="qo-used">{formatBytes(used)} <small>used</small></span>
-        <span className="qo-total">{formatBytes(quota)} <small>total</small></span>
+
+      <div className="flex justify-between text-sm text-gray-500 mt-1">
+        <span>{formatBytes(used)} <small className="text-gray-400">used</small></span>
+        {!isUnlimited ? (
+          <span>{formatBytes(quota)} <small className="text-gray-400">total</small></span>
+        ) : (
+          <span className="text-gray-400 italic">No limit</span>
+        )}
       </div>
+
       {recalcMsg && (
-        <div className={`qo-msg ${recalcMsg.startsWith("Error") ? "err" : "ok"}`}>
+        <div className={`mt-1 text-xs px-1.5 py-1 rounded ${
+          recalcMsg.startsWith("Error") ? "text-red-700 bg-red-100" : "text-green-800 bg-green-100"
+        }`}>
           {recalcMsg}
         </div>
       )}
