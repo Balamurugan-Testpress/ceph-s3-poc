@@ -180,8 +180,9 @@ async def create_new_user(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Error setting advanced limits: {e}")
 
+    quota_mb = (data.user_quota_max_size_kb // 1024) if (data.user_quota_enabled and data.user_quota_max_size_kb > 0) else -1
     await log_action(
-        db, admin, "CREATE_USER", {"username": data.username, "quota_mb": data.quota_mb}
+        db, admin, "CREATE_USER", {"username": data.username, "quota_mb": quota_mb}
     )
 
     return UserCreatedResponse(
