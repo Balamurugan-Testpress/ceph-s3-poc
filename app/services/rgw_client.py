@@ -179,3 +179,133 @@ class RGWClient:
             return url
         except Exception as exc:
             raise RGWError(str(exc)) from exc
+
+    # ── Multipart upload ──
+    #
+    # The browser uses CreateMultipartUpload + UploadPart + CompleteMultipartUpload
+    # to push large files directly to RGW. The backend mints the upload id and the
+    # per-part presigned URLs, then finalizes. See app/api/multipart.py.
+
+    def create_multipart_upload(
+        self, bucket: str, key: str, content_type: str | None = None
+    ) -> str:
+        """Begin a multipart upload. Returns the upload id."""
+        try:
+            params: dict = {"Bucket": bucket, "Key": key}
+            if content_type:
+                params["ContentType"] = content_type
+            resp = self._get_client().create_multipart_upload(**params)
+            return resp["UploadId"]
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def presigned_upload_part_url(
+        self,
+        bucket: str,
+        key: str,
+        upload_id: str,
+        part_number: int,
+        expires_in: int = 3600,
+    ) -> str:
+        """Presigned PUT for a single part. Browser uses this directly against RGW."""
+        try:
+            return self._get_client().generate_presigned_url(
+                "upload_part",
+                Params={
+                    "Bucket": bucket,
+                    "Key": key,
+                    "UploadId": upload_id,
+                    "PartNumber": part_number,
+                },
+                ExpiresIn=expires_in,
+            )
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def complete_multipart_upload(
+        self,
+        bucket: str,
+        key: str,
+        upload_id: str,
+        parts: list[dict],
+    ) -> dict:
+        """Finalize a multipart upload. *parts* is [{PartNumber, ETag}, ...] sorted asc."""
+        try:
+            resp = self._get_client().complete_multipart_upload(
+                Bucket=bucket,
+                Key=key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts},
+            )
+            return {
+                "bucket": bucket,
+                "key": key,
+                "etag": resp.get("ETag"),
+                "location": resp.get("Location"),
+            }
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def abort_multipart_upload(self, bucket: str, key: str, upload_id: str) -> dict:
+        """Cancel an in-progress multipart upload, releasing the parts on RGW."""
+        try:
+            self._get_client().abort_multipart_upload(
+                Bucket=bucket, Key=key, UploadId=upload_id
+            )
+            return {"bucket": bucket, "key": key, "aborted": True}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def list_parts(self, bucket: str, key: str, upload_id: str) -> list[dict]:
+        """List parts already uploaded for *upload_id*. Used by resume to skip work."""
+        try:
+            parts: list[dict] = []
+            marker = 0
+            while True:
+                resp = self._get_client().list_parts(
+                    Bucket=bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                    PartNumberMarker=marker,
+                )
+                for p in resp.get("Parts", []):
+                    parts.append(
+                        {
+                            "part_number": p["PartNumber"],
+                            "etag": p["ETag"],
+                            "size": p["Size"],
+                        }
+                    )
+                if not resp.get("IsTruncated"):
+                    break
+                marker = resp.get("NextPartNumberMarker", 0)
+            return parts
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    # ── CORS ──
+
+    def put_bucket_cors(self, bucket: str, allowed_origin: str = "*") -> dict:
+        """Install a CORS rule that lets the dashboard PUT parts directly from the browser.
+
+        ExposeHeaders=ETag is the key bit — without it, the browser can't read the
+        per-part ETag from the response and CompleteMultipartUpload fails.
+        """
+        try:
+            self._get_client().put_bucket_cors(
+                Bucket=bucket,
+                CORSConfiguration={
+                    "CORSRules": [
+                        {
+                            "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+                            "AllowedOrigins": [allowed_origin],
+                            "AllowedHeaders": ["*"],
+                            "ExposeHeaders": ["ETag"],
+                            "MaxAgeSeconds": 3000,
+                        }
+                    ]
+                },
+            )
+            return {"bucket": bucket, "cors_set": True}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.api.rgw import _get_user_client
+from app.config import settings
 from app.db import get_db
 from app.db.models import AuditLog
 from app.db.schemas import CreateBucketRequest
@@ -32,7 +33,34 @@ async def create_bucket(
     try:
         client = _get_user_client(current_user)
         result = client.create_bucket(data.name)
+        # Install CORS immediately so the browser can do direct multipart PUTs
+        # without an extra round trip. Best-effort: a CORS failure shouldn't
+        # block bucket creation — admin can re-run /cors/ensure later.
+        try:
+            client.put_bucket_cors(data.name, allowed_origin=settings.dashboard_origin)
+        except RGWError:
+            pass
         await log_action(db, current_user, "CREATE_BUCKET", {"bucket": data.name})
+        return result
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/buckets/{bucket}/cors/ensure")
+async def ensure_bucket_cors(
+    bucket: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Install the dashboard CORS rule on an existing bucket.
+
+    For buckets that predate this feature — create_bucket sets CORS for new
+    ones automatically.
+    """
+    try:
+        client = _get_user_client(current_user)
+        result = client.put_bucket_cors(bucket, allowed_origin=settings.dashboard_origin)
+        await log_action(db, current_user, "SET_BUCKET_CORS", {"bucket": bucket})
         return result
     except RGWError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

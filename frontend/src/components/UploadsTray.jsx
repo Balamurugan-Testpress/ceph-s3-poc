@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useUploads } from "../context/UploadsContext";
 import { formatBytes } from "../utils/format";
 
@@ -8,6 +8,10 @@ function statusLabel(u) {
     case "error":      return u.error || "Failed";
     case "cancelled":  return "Cancelled";
     case "finalizing": return `Finalizing on server… · ${formatBytes(u.total)}`;
+    case "paused": {
+      const pct = u.total ? Math.floor((u.loaded / u.total) * 100) : 0;
+      return `Paused · ${pct}% · ${formatBytes(u.loaded)} / ${formatBytes(u.total)}`;
+    }
     default: {
       // Clamp at 99% — the bar only represents bytes-sent-by-browser, but the
       // server still has work to do after that (forward to RGW, audit log).
@@ -24,12 +28,24 @@ function barColor(status) {
   if (status === "error")      return "bg-red-500";
   if (status === "cancelled")  return "bg-gray-400";
   if (status === "finalizing") return "bg-blue-400";
+  if (status === "paused")     return "bg-amber-500";
   return "bg-blue-500";
 }
 
 export default function UploadsTray() {
-  const { uploads, cancel, dismiss, clearFinished } = useUploads();
+  const {
+    uploads,
+    cancel,
+    pause,
+    resume,
+    resumeOrphan,
+    dismiss,
+    clearFinished,
+  } = useUploads();
   const [collapsed, setCollapsed] = useState(false);
+  // One <input> per orphan row — re-picking the file is the only way to
+  // resume after a reload (we can't persist a File handle in IndexedDB).
+  const fileInputs = useRef({});
 
   if (uploads.length === 0) return null;
 
@@ -77,6 +93,9 @@ export default function UploadsTray() {
               u.status === "done" ? 100
               : u.status === "finalizing" ? 100
               : Math.min(99, rawPct);
+            const isMultipart = u.engine === "multipart";
+            const isInFlight =
+              u.status === "uploading" || u.status === "finalizing";
             return (
               <div key={u.id} className="px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
@@ -86,25 +105,74 @@ export default function UploadsTray() {
                     </div>
                     <div className="text-xs text-gray-400 truncate">
                       {u.bucket} · {statusLabel(u)}
+                      {isMultipart && u.parts?.total > 0 && (
+                        <span className="ml-1">
+                          · part {u.parts.done}/{u.parts.total}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  {u.status === "uploading" || u.status === "finalizing" ? (
-                    <button
-                      onClick={() => cancel(u.id)}
-                      title="Cancel"
-                      className="text-xs text-red-500 hover:text-red-700 px-1"
-                    >
-                      ✕
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => dismiss(u.id)}
-                      title="Dismiss"
-                      className="text-xs text-gray-400 hover:text-gray-700 px-1"
-                    >
-                      ✕
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {/* Pause — only for in-flight multipart */}
+                    {isMultipart && u.status === "uploading" && (
+                      <button
+                        onClick={() => pause(u.id)}
+                        title="Pause"
+                        className="text-xs text-amber-600 hover:text-amber-800 px-1"
+                      >
+                        ❚❚
+                      </button>
+                    )}
+                    {/* Resume — paused, with file already in memory (not an orphan) */}
+                    {isMultipart && u.status === "paused" && !u.orphan && (
+                      <button
+                        onClick={() => resume(u.id)}
+                        title="Resume"
+                        className="text-xs text-blue-600 hover:text-blue-800 px-1"
+                      >
+                        ▶
+                      </button>
+                    )}
+                    {/* Resume orphan — needs the user to re-pick the file */}
+                    {isMultipart && u.status === "paused" && u.orphan && (
+                      <>
+                        <button
+                          onClick={() => fileInputs.current[u.id]?.click()}
+                          title={`Re-pick "${u.fileName}" to resume`}
+                          className="text-xs text-blue-600 hover:text-blue-800 px-1"
+                        >
+                          ▶ pick file
+                        </button>
+                        <input
+                          ref={el => { fileInputs.current[u.id] = el; }}
+                          type="file"
+                          className="hidden"
+                          onChange={e => {
+                            const f = e.target.files?.[0];
+                            if (f) resumeOrphan(u.id, f);
+                            e.target.value = "";
+                          }}
+                        />
+                      </>
+                    )}
+                    {isInFlight || u.status === "paused" ? (
+                      <button
+                        onClick={() => cancel(u.id)}
+                        title="Cancel"
+                        className="text-xs text-red-500 hover:text-red-700 px-1"
+                      >
+                        ✕
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => dismiss(u.id)}
+                        title="Dismiss"
+                        className="text-xs text-gray-400 hover:text-gray-700 px-1"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="h-1 bg-gray-100 rounded-full overflow-hidden mt-1">
                   <div

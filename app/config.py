@@ -50,6 +50,14 @@ class Settings:
         default_factory=lambda: os.getenv("RGW_SECRET_KEY", "admin123")
     )
 
+    # Origin that the dashboard is served from. Written into bucket CORS rules
+    # so the browser is allowed to PUT multipart parts directly to RGW. Default
+    # "*" keeps the docker-compose demo working without extra configuration; set
+    # to your real origin (e.g. https://dashboard.example.com) in production.
+    dashboard_origin: str = field(
+        default_factory=lambda: os.getenv("DASHBOARD_ORIGIN", "*")
+    )
+
     # ── App admin credentials ──
     admin_username: str = field(
         default_factory=lambda: os.getenv("ADMIN_USERNAME", "admin")

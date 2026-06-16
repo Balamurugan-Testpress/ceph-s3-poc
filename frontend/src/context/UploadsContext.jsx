@@ -2,17 +2,35 @@
 // between pages — the user can kick off a large upload from BucketExplorer
 // then go look at audit logs while it runs.
 //
-// Each item: { id, bucket, key, file, status, loaded, total, error, xhr }
-//   status: 'uploading' | 'done' | 'error' | 'cancelled'
+// Two engines, chosen by file size:
 //
-// Consumers:
-//   useUploads() -> { uploads, enqueue, cancel, dismiss, onComplete }
-//   onComplete(cb) registers a callback fired when an upload finishes
-//   successfully — BucketExplorer uses this to refresh its object list
-//   without polling.
+//   • < 16 MiB  →  single POST through the API (uploadWithProgress). Cheap,
+//                  cancels by aborting the XHR; cancel-after-bytes-landed
+//                  triggers a compensating DELETE.
+//   • ≥ 16 MiB  →  presigned multipart direct to RGW (startResumableUpload).
+//                  Supports pause/resume across reloads via IndexedDB.
+//
+// Each item in `uploads`:
+//   { id, bucket, key, file, status, loaded, total, error, engine,
+//     parts: { done, total }, fingerprint? }
+//   status: 'uploading' | 'paused' | 'finalizing' | 'done' | 'error' | 'cancelled'
+//   engine: 'single' | 'multipart'
 
-import { createContext, useCallback, useContext, useReducer, useRef } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useReducer,
+  useRef,
+} from "react";
 import { uploadWithProgress } from "../api/upload";
+import {
+  MULTIPART_THRESHOLD,
+  fingerprintFor,
+  startResumableUpload,
+} from "../api/uploadResumable";
+import { deleteSession, listSessions } from "../api/idb";
 import { apiFetch } from "../api/client";
 
 const UploadsContext = createContext(null);
@@ -29,13 +47,27 @@ function reducer(state, action) {
       return state.map(u => {
         if (u.id !== action.id) return u;
         const isComplete = action.total > 0 && action.loaded >= action.total;
+        const nextStatus =
+          isComplete && u.status === "uploading" && u.engine === "single"
+            ? "finalizing"
+            : u.status;
         return {
           ...u,
           loaded: action.loaded,
           total: action.total,
-          status: isComplete && u.status === "uploading" ? "finalizing" : u.status,
+          status: nextStatus,
         };
       });
+    case "parts":
+      return state.map(u =>
+        u.id === action.id
+          ? { ...u, parts: { done: action.done, total: action.total } }
+          : u,
+      );
+    case "status":
+      return state.map(u =>
+        u.id === action.id ? { ...u, status: action.status } : u,
+      );
     case "done":
       return state.map(u =>
         u.id === action.id ? { ...u, status: "done", loaded: u.total } : u,
@@ -52,7 +84,10 @@ function reducer(state, action) {
       return state.filter(u => u.id !== action.id);
     case "clearFinished":
       return state.filter(
-        u => u.status === "uploading" || u.status === "finalizing",
+        u =>
+          u.status === "uploading" ||
+          u.status === "finalizing" ||
+          u.status === "paused",
       );
     default:
       return state;
@@ -61,16 +96,16 @@ function reducer(state, action) {
 
 export function UploadsProvider({ children }) {
   const [uploads, dispatch] = useReducer(reducer, []);
-  // xhr handles aren't serializable, so keep them out of reducer state.
+  // Non-serialisable handles — controllers, XHRs, callbacks — live outside
+  // reducer state so they don't trip React's snapshot machinery.
   const xhrs = useRef(new Map());
-  // Tracks ids the user clicked Cancel on. We can't rely on the xhr's `abort`
-  // event alone: if abort fires after the server already returned its final
-  // response, the `load` event runs instead and we'd think the upload
-  // succeeded. We mark cancellation here and, on `load` of a cancelled
-  // upload, fire a compensating DELETE so the object doesn't linger.
+  const multipartCtls = useRef(new Map());
+  // Tracks ids the user clicked Cancel on for the single-PUT path. We can't
+  // rely on the xhr's abort event alone: if abort fires after the server
+  // already returned its final response, the load event runs instead and we'd
+  // think the upload succeeded. We mark cancellation here and, on load of a
+  // cancelled upload, fire a compensating DELETE so the object doesn't linger.
   const cancelled = useRef(new Set());
-  // Subscribers for completion events. Ref so adding a listener doesn't
-  // re-render the provider.
   const completionListeners = useRef(new Set());
 
   const onComplete = useCallback((cb) => {
@@ -78,20 +113,14 @@ export function UploadsProvider({ children }) {
     return () => completionListeners.current.delete(cb);
   }, []);
 
-  const enqueue = useCallback((bucket, file) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const item = {
-      id,
-      bucket,
-      key: file.name,
-      file,
-      status: "uploading",
-      loaded: 0,
-      total: file.size,
-      error: null,
-    };
-    dispatch({ type: "enqueue", item });
+  function fireCompletion(bucket, key) {
+    completionListeners.current.forEach(cb => {
+      try { cb({ bucket, key }); } catch { /* ignore */ }
+    });
+  }
 
+  // ── Single-PUT engine (small files, unchanged behaviour) ─────────────
+  function enqueueSingle(id, bucket, file) {
     const { promise, xhr } = uploadWithProgress(
       `/api/s3/buckets/${bucket}/upload`,
       file,
@@ -104,9 +133,6 @@ export function UploadsProvider({ children }) {
 
     promise
       .then(() => {
-        // Race: the user clicked Cancel after bytes had already reached the
-        // server. The xhr resolved instead of aborting. Compensate by
-        // deleting the now-uploaded object.
         if (cancelled.current.has(id)) {
           dispatch({ type: "cancelled", id });
           apiFetch(
@@ -116,16 +142,9 @@ export function UploadsProvider({ children }) {
           return;
         }
         dispatch({ type: "done", id });
-        completionListeners.current.forEach(cb => {
-          try { cb({ bucket, key: file.name }); } catch { /* ignore */ }
-        });
+        fireCompletion(bucket, file.name);
       })
       .catch(err => {
-        // Abort surfaces here too — distinguish via the readyState/status check
-        // done in uploadWithProgress (it rejects with a marker error).
-        // The server-side 499 short-circuit is also handled here (we'd see a
-        // non-2xx response and reject), and 499 → no object on the server,
-        // so no DELETE needed.
         if (err?.name === "AbortError") {
           dispatch({ type: "cancelled", id });
         } else {
@@ -136,15 +155,130 @@ export function UploadsProvider({ children }) {
         xhrs.current.delete(id);
         cancelled.current.delete(id);
       });
+  }
 
+  // ── Multipart engine (large files, presigned direct-to-RGW) ───────────
+  function enqueueMultipart(id, bucket, file, fingerprint) {
+    const ctl = startResumableUpload({
+      bucket,
+      file,
+      fingerprint,
+      onProgress: (loaded, total) =>
+        dispatch({ type: "progress", id, loaded, total }),
+      onParts: (done, total) =>
+        dispatch({ type: "parts", id, done, total }),
+    });
+    multipartCtls.current.set(id, ctl);
+
+    ctl.promise
+      .then(() => {
+        dispatch({ type: "done", id });
+        fireCompletion(bucket, file.name);
+      })
+      .catch(err => {
+        if (err?.name === "AbortError") {
+          dispatch({ type: "cancelled", id });
+        } else {
+          dispatch({ type: "error", id, error: err.message || String(err) });
+        }
+      })
+      .finally(() => {
+        multipartCtls.current.delete(id);
+      });
+  }
+
+  const enqueue = useCallback((bucket, file) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const engine = file.size >= MULTIPART_THRESHOLD ? "multipart" : "single";
+    const fingerprint =
+      engine === "multipart" ? fingerprintFor(bucket, file) : null;
+    const item = {
+      id,
+      bucket,
+      key: file.name,
+      file,
+      status: "uploading",
+      loaded: 0,
+      total: file.size,
+      error: null,
+      engine,
+      parts: { done: 0, total: 0 },
+      fingerprint,
+    };
+    dispatch({ type: "enqueue", item });
+
+    if (engine === "single") {
+      enqueueSingle(id, bucket, file);
+    } else {
+      enqueueMultipart(id, bucket, file, fingerprint);
+    }
     return id;
   }, []);
 
   const cancel = useCallback((id) => {
+    const ctl = multipartCtls.current.get(id);
+    if (ctl) {
+      ctl.cancel();
+      return;
+    }
+    // Orphan row resurfaced from IndexedDB on reload — no controller exists.
+    // Best-effort abort against RGW and drop the local row.
+    const orphan = uploads.find(u => u.id === id && u.orphan);
+    if (orphan) {
+      apiFetch("/api/multipart/abort", {
+        method: "POST",
+        body: JSON.stringify({
+          bucket: orphan.bucket,
+          key: orphan.key,
+          // We don't carry uploadId on the row right now; abort by re-using
+          // the session record we stored.
+          upload_id: orphan.uploadId || "",
+        }),
+      }).catch(() => {});
+      deleteSession(orphan.fingerprint).catch(() => {});
+      dispatch({ type: "cancelled", id });
+      return;
+    }
     cancelled.current.add(id);
     const xhr = xhrs.current.get(id);
     if (xhr) xhr.abort();
+  }, [uploads]);
+
+  const pause = useCallback((id) => {
+    const ctl = multipartCtls.current.get(id);
+    if (!ctl) return;
+    ctl.pause();
+    dispatch({ type: "status", id, status: "paused" });
   }, []);
+
+  const resume = useCallback((id) => {
+    const ctl = multipartCtls.current.get(id);
+    if (ctl) {
+      ctl.resume();
+      dispatch({ type: "status", id, status: "uploading" });
+    }
+  }, []);
+
+  // Resume an orphan row found in IndexedDB. The user re-picks the file (we
+  // can't persist a File handle across reloads), and we pass the same
+  // fingerprint so the engine attaches to the existing upload id.
+  const resumeOrphan = useCallback((orphanId, file) => {
+    const orphan = uploads.find(u => u.id === orphanId);
+    if (!orphan) return;
+    // Sanity check: did the user pick the same file? Same fingerprint inputs
+    // (name, size, lastModified, bucket) must produce the same fingerprint.
+    const fp = fingerprintFor(orphan.bucket, file);
+    if (fp !== orphan.fingerprint) {
+      dispatch({
+        type: "error",
+        id: orphanId,
+        error: "Picked file doesn't match the paused upload",
+      });
+      return;
+    }
+    dispatch({ type: "status", id: orphanId, status: "uploading" });
+    enqueueMultipart(orphanId, orphan.bucket, file, orphan.fingerprint);
+  }, [uploads]);
 
   const dismiss = useCallback((id) => {
     dispatch({ type: "dismiss", id });
@@ -154,9 +288,64 @@ export function UploadsProvider({ children }) {
     dispatch({ type: "clearFinished" });
   }, []);
 
+  // On mount, surface any orphan multipart sessions found in IndexedDB as
+  // `paused` rows so the user knows there's an upload waiting for them.
+  // We don't auto-resume — the browser has no File handle, so the user must
+  // re-pick the file from disk via the UploadsTray.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const sessions = await listSessions();
+        if (cancelled || !sessions.length) return;
+        for (const s of sessions) {
+          const loadedBytes = Object.values(s.parts || {}).reduce(
+            (sum, p) => sum + (p.size || 0),
+            0,
+          );
+          dispatch({
+            type: "enqueue",
+            item: {
+              id: `orphan-${s.fingerprint}`,
+              bucket: s.bucket,
+              key: s.key,
+              file: null,
+              status: "paused",
+              loaded: loadedBytes,
+              total: s.totalSize,
+              error: null,
+              engine: "multipart",
+              parts: {
+                done: Object.keys(s.parts || {}).length,
+                total: s.totalParts,
+              },
+              fingerprint: s.fingerprint,
+              uploadId: s.uploadId,
+              orphan: true,
+              fileName: s.fileName,
+            },
+          });
+        }
+      } catch {
+        // IndexedDB unavailable (private mode, etc.) — silently skip.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <UploadsContext.Provider
-      value={{ uploads, enqueue, cancel, dismiss, clearFinished, onComplete }}
+      value={{
+        uploads,
+        enqueue,
+        cancel,
+        pause,
+        resume,
+        resumeOrphan,
+        dismiss,
+        clearFinished,
+        onComplete,
+      }}
     >
       {children}
     </UploadsContext.Provider>
