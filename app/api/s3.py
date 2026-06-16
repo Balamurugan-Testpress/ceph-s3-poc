@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -52,11 +54,27 @@ async def delete_bucket_endpoint(
 @router.post("/buckets/{bucket}/upload")
 async def upload_object(
     bucket: str,
+    request: Request,
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload a file and track usage delta. Blocks if over quota."""
+    """Upload a file and track usage delta. Blocks if over quota.
+
+    Two pieces of "don't be unresponsive" here:
+
+    1) The S3 PUT is a synchronous boto3 call. Running it directly on the
+       event loop freezes every other request to this worker until it
+       finishes — for a 500MB file that's seconds-to-minutes of blocked
+       /buckets, /objects, etc. We push it to a threadpool so the loop
+       stays free.
+
+    2) If the client disconnected (browser closed, user hit cancel after
+       the bytes had already arrived but before the PUT completed), we
+       skip the PUT entirely and return 499 (Nginx's "client closed
+       request" convention). Saves bandwidth to RGW and prevents the
+       "I cancelled but the object still appeared" bug.
+    """
     try:
         contents = await file.read()
         uid = uuid.UUID(current_user["id"]) if current_user["id"] != "admin" else None
@@ -71,8 +89,13 @@ async def upload_object(
                     detail=f"Quota exceeded: {used + len(contents)} > {quota} bytes",
                 )
 
+        if await request.is_disconnected():
+            return Response(status_code=499)
+
         client = _get_user_client(current_user)
-        result = client.upload_object(bucket, file.filename or "unnamed", contents)
+        result = await run_in_threadpool(
+            client.upload_object, bucket, file.filename or "unnamed", contents
+        )
 
         # Track usage
         if uid:

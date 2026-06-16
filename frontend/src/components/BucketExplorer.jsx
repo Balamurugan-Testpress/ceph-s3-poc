@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
+import { useUploads } from "../context/UploadsContext";
 
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
@@ -224,7 +225,9 @@ function ConfirmDialog({ title, message, onConfirm, onCancel, loading }) {
 
 function BucketExplorer() {
   const queryClient = useQueryClient();
+  const { enqueue: enqueueUpload, onComplete: onUploadComplete } = useUploads();
   const [selected, setSelected] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
   const [bucketTab, setBucketTab] = useState("objects"); // "objects" or "settings"
   const [policyText, setPolicyText] = useState("");
   const [accessLevel, setAccessLevel] = useState("private"); // "private", "public", "custom"
@@ -241,7 +244,6 @@ function BucketExplorer() {
   const [showCreateInput, setShowCreateInput] = useState(false);
   const [newBucketName, setNewBucketName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null); // { type: 'bucket'|'object', data }
   const [shareTarget, setShareTarget] = useState(null); // { bucket, key } when share modal open
 
@@ -426,26 +428,63 @@ function BucketExplorer() {
     setLoadingObjects(false);
   }
 
-  // ── Upload file ──
-  async function handleUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file || !selected) return;
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      await apiFetch(`/api/s3/buckets/${selected}/upload`, {
-        method: "POST",
-        body: formData,
-      });
-      addNotification("success", `"${file.name}" uploaded`);
-      // Reload objects
-      await openBucket(selected);
-    } catch (err) {
-      addNotification("error", `Upload failed: ${err.message}`);
-    }
-    setUploading(false);
+  // ── Upload file(s) ──
+  // Files are handed off to the global upload queue (UploadsContext) so the
+  // user can keep working — including navigating away — while they upload.
+  // The tray in the layout shows per-file progress + cancel.
+  function uploadFiles(fileList, bucket) {
+    const target = bucket || selected;
+    if (!target) return;
+    const files = Array.from(fileList || []);
+    for (const f of files) enqueueUpload(target, f);
+  }
+
+  function handleUpload(e) {
+    uploadFiles(e.target.files, selected);
     e.target.value = "";
+  }
+
+  // Subscribe to completion events so the open bucket's object list refreshes
+  // when an upload targeting it finishes — without polling.
+  useEffect(() => {
+    const unsubscribe = onUploadComplete(({ bucket }) => {
+      if (bucket === selected) {
+        // Re-fetch via the same path openBucket uses; keep filters/sort intact
+        // by only refreshing the data, not the UI state.
+        apiFetch(`/api/rgw/buckets/${selected}/objects?max_keys=100`)
+          .then(data => {
+            setObjects(data.objects || []);
+            setObjectInfo({
+              count: data.key_count || 0,
+              total: data.key_count || 0,
+              truncated: data.is_truncated || false,
+              nextToken: data.next_token,
+            });
+          })
+          .catch(() => { /* tray already surfaces errors */ });
+        // Bucket-level usage/size may have changed
+        queryClient.invalidateQueries({ queryKey: ["buckets"] });
+        queryClient.invalidateQueries({ queryKey: ["s3Usage"] });
+      }
+    });
+    return unsubscribe;
+  }, [onUploadComplete, selected, queryClient]);
+
+  // ── Drag and drop ──
+  function handleDragOver(e) {
+    if (!selected) return;
+    e.preventDefault();
+    setDragOver(true);
+  }
+  function handleDragLeave(e) {
+    e.preventDefault();
+    setDragOver(false);
+  }
+  function handleDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    if (!selected) return;
+    uploadFiles(e.dataTransfer.files, selected);
   }
 
   // ── Selection ──
@@ -718,7 +757,21 @@ function BucketExplorer() {
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-w-0">
+        <div
+          className={`flex-1 min-w-0 relative rounded transition-colors ${
+            dragOver && selected ? "ring-2 ring-blue-400 bg-blue-50/40" : ""
+          }`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {dragOver && selected && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+              <div className="bg-blue-600 text-white text-sm px-4 py-2 rounded shadow-lg">
+                Drop to upload to <strong>{selected}</strong>
+              </div>
+            </div>
+          )}
           {!selected && (
             <div className="flex items-center justify-center h-48 text-gray-400 italic">
               Select a bucket to browse objects
@@ -751,10 +804,10 @@ function BucketExplorer() {
                   </>
                 )}
                 <div className="flex-1" />
-                {/* Upload button */}
-                <label className={`px-2 py-1 text-xs rounded cursor-pointer ${uploading ? "bg-gray-400" : "bg-green-600 hover:bg-green-700"} text-white disabled:opacity-60`}>
-                  {uploading ? "Uploading…" : "Upload"}
-                  <input type="file" className="hidden" onChange={handleUpload} disabled={uploading} />
+                {/* Upload button — uploads run in the background tray */}
+                <label className="px-2 py-1 text-xs rounded cursor-pointer bg-green-600 hover:bg-green-700 text-white">
+                  Upload
+                  <input type="file" multiple className="hidden" onChange={handleUpload} />
                 </label>
                 {bucketTab === "objects" && objSelected.size > 0 && (
                   <button
@@ -897,7 +950,7 @@ function BucketExplorer() {
                   <p className="italic mb-2">This bucket is empty</p>
                   <label className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded cursor-pointer hover:bg-blue-700 transition-colors">
                     Upload first file
-                    <input type="file" className="hidden" onChange={handleUpload} />
+                    <input type="file" multiple className="hidden" onChange={handleUpload} />
                   </label>
                 </div>
               )}
