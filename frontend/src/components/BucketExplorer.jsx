@@ -2,20 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
 import { useUploads } from "../context/UploadsContext";
-
-function formatBytes(bytes) {
-  if (!bytes) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(Math.abs(bytes)) / Math.log(1024));
-  return (bytes / Math.pow(1024, i)).toFixed(1) + " " + units[i];
-}
-
-function formatCompact(num) {
-  if (!num) return "0";
-  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + "M";
-  if (num >= 1_000) return (num / 1_000).toFixed(1) + "k";
-  return String(num);
-}
+import { formatBytes, formatCompact } from "../utils/format";
 
 function Notification({ type, message, onDismiss }) {
   const bg = type === "error" ? "bg-red-100 text-red-800" :

@@ -1,12 +1,6 @@
 import { useState } from "react";
 import { useUploads } from "../context/UploadsContext";
-
-function formatBytes(bytes) {
-  if (!bytes) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(Math.abs(bytes)) / Math.log(1024));
-  return (bytes / Math.pow(1024, i)).toFixed(1) + " " + units[i];
-}
+import { formatBytes } from "../utils/format";
 
 function statusLabel(u) {
   switch (u.status) {

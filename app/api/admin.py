@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import AuditLog
 
 from app.api.deps import require_admin
 from app.config import settings
@@ -104,6 +107,38 @@ async def list_audit_logs(
     db: AsyncSession = Depends(get_db), admin: dict = Depends(require_admin)
 ):
     return await get_audit_logs(db)
+
+
+@router.get("/analytics/activity")
+async def analytics_activity(
+    days: int = Query(14, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """Audit-log activity bucketed by day and action.
+
+    Used by the dashboard's ActivityTimeline. Single GROUP BY query — fine
+    at POC scale; swap to a materialized view if `audit_logs` grows past
+    a few hundred thousand rows.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    day_col = func.date_trunc("day", AuditLog.timestamp).label("day")
+    stmt = (
+        select(day_col, AuditLog.action, func.count().label("count"))
+        .where(AuditLog.timestamp >= since)
+        .group_by(day_col, AuditLog.action)
+        .order_by(day_col)
+    )
+    rows = (await db.execute(stmt)).all()
+    series = [
+        {
+            "day": row.day.date().isoformat() if row.day else None,
+            "action": row.action,
+            "count": int(row.count),
+        }
+        for row in rows
+    ]
+    return {"days": days, "series": series}
 
 
 @router.post("/users", response_model=UserCreatedResponse)

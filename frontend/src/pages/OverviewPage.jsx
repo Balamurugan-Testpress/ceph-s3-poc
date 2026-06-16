@@ -1,6 +1,11 @@
 import { useAuth } from "../context/AuthContext";
 import QuotaUsage from "../components/QuotaUsage";
 import ClusterStatus from "../components/ClusterStatus";
+import KpiTiles from "../components/dashboard/KpiTiles";
+import StorageBreakdown from "../components/dashboard/StorageBreakdown";
+import ActivityTimeline from "../components/dashboard/ActivityTimeline";
+import UsersUsageTable from "../components/dashboard/UsersUsageTable";
+import CollapsibleSection from "../components/dashboard/CollapsibleSection";
 
 export default function OverviewPage() {
   const { user } = useAuth();
@@ -9,28 +14,40 @@ export default function OverviewPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Overview</h1>
+        <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Ceph cluster status and system metrics.
+          {isAdmin
+            ? "Cluster-wide storage, usage, and activity at a glance."
+            : "Your storage, buckets, and recent activity."}
         </p>
       </div>
 
-      {isAdmin ? (
+      <KpiTiles isAdmin={isAdmin} />
+
+      {!isAdmin && (
         <section className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
           <h2 className="m-0 mb-4 text-lg text-gray-800 font-semibold">
-            Cluster Health
+            My Storage Quota
           </h2>
-          <ClusterStatus />
+          <QuotaUsage />
         </section>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <section className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-            <h2 className="m-0 mb-4 text-lg text-gray-800 font-semibold">
-              My Storage Quota
-            </h2>
-            <QuotaUsage />
-          </section>
-        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <StorageBreakdown isAdmin={isAdmin} />
+        <ActivityTimeline isAdmin={isAdmin} />
+      </div>
+
+      {isAdmin && <UsersUsageTable />}
+
+      {isAdmin && (
+        <CollapsibleSection
+          title="Cluster Health"
+          subtitle="OSDs, monitors, pools, raw capacity"
+          defaultOpen={false}
+        >
+          <ClusterStatus />
+        </CollapsibleSection>
       )}
     </div>
   );

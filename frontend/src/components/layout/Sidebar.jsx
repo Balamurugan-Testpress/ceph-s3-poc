@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import {
-  LayoutDashboard,
+  BarChart3,
   Users,
   Database,
   Key,
@@ -13,7 +13,7 @@ export default function Sidebar() {
   const isAdmin = user?.role === "admin";
 
   const navItems = [
-    { name: "Overview", path: "/", icon: LayoutDashboard },
+    { name: "Dashboard", path: "/", icon: BarChart3 },
     { name: "Buckets", path: "/buckets", icon: Database },
     { name: "Access Keys", path: "/keys", icon: Key },
   ];

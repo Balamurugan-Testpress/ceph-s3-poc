@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.api.rgw import _get_user_client
 from app.db import get_db
+from app.db.models import AuditLog
 from app.db.schemas import CreateBucketRequest
 from app.services.rgw_client import RGWError
 from app.services.user_service import recalculate_usage, update_used_bytes
@@ -190,6 +193,40 @@ async def get_usage(
         "quota_bytes": current_user.get("quota_bytes", 0),
         "is_admin": current_user.get("id") == "admin" or current_user.get("role") == "admin",
     }
+
+
+@router.get("/activity")
+async def my_activity(
+    days: int = Query(14, ge=1, le=90),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Audit-log activity for the *current* user, bucketed by day and action.
+
+    Same shape as /admin/analytics/activity but filtered to this user — lets
+    the tenant dashboard show their own activity timeline.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    day_col = func.date_trunc("day", AuditLog.timestamp).label("day")
+    stmt = (
+        select(day_col, AuditLog.action, func.count().label("count"))
+        .where(
+            AuditLog.timestamp >= since,
+            AuditLog.user_id == str(current_user["id"]),
+        )
+        .group_by(day_col, AuditLog.action)
+        .order_by(day_col)
+    )
+    rows = (await db.execute(stmt)).all()
+    series = [
+        {
+            "day": row.day.date().isoformat() if row.day else None,
+            "action": row.action,
+            "count": int(row.count),
+        }
+        for row in rows
+    ]
+    return {"days": days, "series": series}
 
 
 @router.post("/recalculate-usage")

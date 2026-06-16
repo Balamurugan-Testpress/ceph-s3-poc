@@ -1,15 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-
-function formatBytes(bytes) {
-  if (bytes === 0 || bytes === null || bytes === undefined) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(Math.abs(bytes)) / Math.log(1024));
-  const val = bytes / Math.pow(1024, i);
-  const decimals = i === 0 ? 0 : 2;
-  return val.toFixed(decimals) + " " + units[i];
-}
+import { formatBytes } from "../utils/format";
 
 function QuotaUsage() {
   const { user } = useAuth();
