@@ -14,7 +14,7 @@ from app.config import settings
 from app.db import get_db
 from app.db.models import User
 from app.db.schemas import LoginRequest, LoginResponse, UserOut
-from app.services.user_service import get_user_by_username
+from app.services.user_service import get_user_by_username, verify_password
 
 logger = logging.getLogger("ceph-s3-poc")
 
@@ -100,9 +100,11 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
         )
 
     # 2. Otherwise check the database for a tenant user.
-    #    All users share the same master password (admin password).
+    #    Verify against the user's own bcrypt-hashed password (was previously
+    #    comparing against the admin password, which meant tenants could
+    #    never actually log in with their own credentials).
     user = await get_user_by_username(db, data.username)
-    if not user or data.password != admin_pass:
+    if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid Credentials")
 
     # Auto-heal: if the RGW user was wiped from Ceph (e.g. RGW data reset),
