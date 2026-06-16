@@ -7,9 +7,10 @@ Tenant: uses their own S3 keys — sees only their own buckets/objects.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -257,6 +258,50 @@ async def download_object(
             db, current_user, "DOWNLOAD_OBJECT", {"bucket": bucket, "key": key}
         )
         return {"url": url}
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+class PresignRequest(BaseModel):
+    # 60s floor (no surprise sub-minute links from a buggy slider).
+    # 7-day ceiling matches AWS SigV4's hard max of 604800s — boto3 rejects
+    # anything larger, so bound it here for a clean 422 instead of a 502.
+    expires_in: int = Field(3600, ge=60, le=7 * 24 * 3600)
+
+
+@router.post("/buckets/{bucket}/objects/{key:path}/presign")
+async def presign_object(
+    bucket: str,
+    key: str,
+    data: PresignRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a time-limited share URL for an object.
+
+    Distinct from /download: this returns a transferable capability whose
+    lifetime the caller chose, so it gets its own audit action.
+    """
+    try:
+        client = _get_user_client(current_user)
+        url = client.presigned_url(bucket, key, expires_in=data.expires_in)
+        # expires_at is computed against the server clock — the same clock the
+        # signature is signed with — so the UI doesn't mislead users whose
+        # local clock is skewed.
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=data.expires_in)
+        ).isoformat()
+        await log_action(
+            db,
+            current_user,
+            "GENERATE_PRESIGNED_URL",
+            {"bucket": bucket, "key": key, "expires_in": data.expires_in},
+        )
+        return {
+            "url": url,
+            "expires_in": data.expires_in,
+            "expires_at": expires_at,
+        }
     except RGWError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

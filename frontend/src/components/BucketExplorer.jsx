@@ -33,6 +33,168 @@ function SortIcon({ active, direction }) {
   return <span className="text-blue-600 ml-1">{direction === "asc" ? "↑" : "↓"}</span>;
 }
 
+function ShareLinkDialog({ bucket, objectKey, onClose, addNotification }) {
+  const PRESETS = [
+    { label: "5 min",   seconds: 300 },
+    { label: "1 hour",  seconds: 3600 },
+    { label: "24 hours", seconds: 86400 },
+    { label: "7 days",  seconds: 604800 },
+  ];
+  const [seconds, setSeconds] = useState(3600);
+  const [customMode, setCustomMode] = useState(false);
+  const [customMinutes, setCustomMinutes] = useState(60);
+  const [result, setResult] = useState(null); // { url, expires_in, expires_at }
+  const [loading, setLoading] = useState(false);
+
+  async function generate() {
+    const expires_in = customMode ? Math.round(customMinutes * 60) : seconds;
+    setLoading(true);
+    try {
+      const data = await apiFetch(
+        `/api/rgw/buckets/${bucket}/objects/${encodeURI(objectKey)}/presign`,
+        { method: "POST", body: JSON.stringify({ expires_in }) },
+      );
+      setResult(data);
+    } catch (err) {
+      addNotification("error", `Failed to generate link: ${err.message}`);
+    }
+    setLoading(false);
+  }
+
+  async function copy() {
+    // navigator.clipboard requires HTTPS or localhost. On plain-HTTP prod it
+    // throws — fall back to selecting the text so the user can Cmd-C.
+    try {
+      await navigator.clipboard.writeText(result.url);
+      addNotification("success", "Link copied to clipboard");
+    } catch {
+      const input = document.getElementById("share-link-url");
+      if (input) {
+        input.focus();
+        input.select();
+      }
+      addNotification("info", "Press Cmd/Ctrl-C to copy");
+    }
+  }
+
+  const expiresAtLabel = result?.expires_at
+    ? new Date(result.expires_at).toLocaleString()
+    : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-lg shadow-xl p-6 max-w-lg w-full mx-4">
+        <h3 className="text-sm font-semibold text-gray-800 mb-1">Share Link</h3>
+        <p className="text-xs text-gray-500 mb-4 font-mono break-all">{objectKey}</p>
+
+        {!result ? (
+          <>
+            <p className="text-xs text-gray-600 mb-2">Link expires after:</p>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {PRESETS.map(p => {
+                const active = !customMode && seconds === p.seconds;
+                return (
+                  <button
+                    key={p.seconds}
+                    onClick={() => { setCustomMode(false); setSeconds(p.seconds); }}
+                    className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+                      active
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setCustomMode(true)}
+                className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+                  customMode
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                Custom…
+              </button>
+            </div>
+
+            {customMode && (
+              <div className="flex items-center gap-2 mb-3 text-xs text-gray-600">
+                <input
+                  type="number"
+                  min="1"
+                  max="10080"
+                  value={customMinutes}
+                  onChange={e => setCustomMinutes(Number(e.target.value))}
+                  className="w-24 px-2 py-1 border border-gray-300 rounded text-sm"
+                />
+                <span>minutes (max 10080 = 7 days)</span>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={onClose}
+                disabled={loading}
+                className="px-3 py-1.5 text-xs rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={generate}
+                disabled={loading || (customMode && (!customMinutes || customMinutes < 1))}
+                className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {loading ? "Generating…" : "Generate Link"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-gray-600 mb-2">
+              Expires {expiresAtLabel ? <>at <strong>{expiresAtLabel}</strong></> : `in ${result.expires_in}s`}.
+            </p>
+            <div className="flex gap-2 mb-3">
+              <input
+                id="share-link-url"
+                type="text"
+                readOnly
+                value={result.url}
+                onFocus={e => e.target.select()}
+                className="flex-1 px-2 py-1.5 text-xs font-mono border border-gray-300 rounded bg-gray-50 text-gray-700"
+              />
+              <button
+                onClick={copy}
+                className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700"
+              >
+                Copy
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 italic mb-4">
+              Anyone with this URL can download the object until it expires. Treat it like a password.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setResult(null)}
+                className="px-3 py-1.5 text-xs rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+              >
+                New link
+              </button>
+              <button
+                onClick={onClose}
+                className="px-3 py-1.5 text-xs rounded bg-gray-800 text-white hover:bg-gray-900"
+              >
+                Done
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ConfirmDialog({ title, message, onConfirm, onCancel, loading }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -81,6 +243,7 @@ function BucketExplorer() {
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null); // { type: 'bucket'|'object', data }
+  const [shareTarget, setShareTarget] = useState(null); // { bucket, key } when share modal open
 
   const addNotification = useCallback((type, message) => {
     const id = Date.now() + Math.random();
@@ -702,6 +865,13 @@ function BucketExplorer() {
                               ⬇
                             </button>
                             <button
+                              title="Share link"
+                              onClick={() => setShareTarget({ bucket: selected, key: obj.key })}
+                              className="px-1.5 py-1 border border-gray-300 rounded bg-white text-gray-600 text-xs cursor-pointer hover:bg-gray-50 mr-1 transition-colors"
+                            >
+                              🔗
+                            </button>
+                            <button
                               title="Delete"
                               onClick={() => handleDelete(selected, obj.key)}
                               className="px-1.5 py-1 border border-gray-300 rounded bg-white text-red-600 text-xs cursor-pointer hover:bg-red-50 transition-colors"
@@ -836,6 +1006,14 @@ function BucketExplorer() {
           message={`Delete ${confirmDelete.data.length} selected object(s)?`}
           onConfirm={() => confirmBulkDelete(confirmDelete.data)}
           onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+      {shareTarget && (
+        <ShareLinkDialog
+          bucket={shareTarget.bucket}
+          objectKey={shareTarget.key}
+          onClose={() => setShareTarget(null)}
+          addNotification={addNotification}
         />
       )}
     </div>
