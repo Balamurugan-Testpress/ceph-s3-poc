@@ -9,38 +9,36 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  LabelList,
 } from "recharts";
 import { apiFetch } from "../../api/client";
 import { formatBytes } from "../../utils/format";
 
-// Horizontal bar chart of the top-N consumers — buckets for everyone,
-// or (admin only) toggled to users. Truncates long names so the y-axis
-// stays readable; the full name is in the tooltip.
-const COLORS = [
-  "#3b82f6",
-  "#8b5cf6",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#06b6d4",
-  "#ec4899",
-  "#84cc16",
-  "#f97316",
-  "#6366f1",
-];
+// Top-N consumers chart. The previous version painted each bar a different
+// colour from a 10-step rainbow — pretty in isolation, noisy on a dashboard
+// next to two other charts. We use a single accent (brand teal) and let
+// length carry the visual weight. Each row gets a percent-of-total chip in
+// the tooltip and a byte-formatted label at the end of the bar.
+
+const ACCENT = "#14b8a6";        // brand-500
+const ACCENT_TINT = "#5eead4";   // brand-300, for the lighter "long tail" rows
 
 function truncate(s, n = 24) {
   if (!s) return "";
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-function TipBytes({ active, payload }) {
+function TipBytes({ active, payload, total }) {
   if (!active || !payload?.length) return null;
   const row = payload[0].payload;
+  const pct = total > 0 ? (row.size / total) * 100 : 0;
   return (
-    <div className="bg-white border border-gray-200 rounded-md shadow-sm px-3 py-2 text-xs">
+    <div className="bg-white border border-gray-200 rounded-md shadow-md px-3 py-2 text-xs">
       <div className="font-medium text-gray-800">{row.fullName}</div>
-      <div className="text-gray-500">{formatBytes(row.size)}</div>
+      <div className="text-gray-600 mt-0.5">
+        {formatBytes(row.size)}
+        <span className="text-gray-400 ml-1.5">· {pct.toFixed(1)}% of total</span>
+      </div>
       {row.subtitle && (
         <div className="text-gray-400 mt-0.5">{row.subtitle}</div>
       )}
@@ -67,8 +65,8 @@ export default function StorageBreakdown({ isAdmin }) {
   let data = [];
   if (mode === "buckets") {
     data = (buckets.data?.buckets || [])
-      .filter((b) => (b.size_bytes || 0) > 0)
-      .map((b) => ({
+      .filter(b => (b.size_bytes || 0) > 0)
+      .map(b => ({
         name: truncate(b.name),
         fullName: b.name,
         size: b.size_bytes || 0,
@@ -78,8 +76,8 @@ export default function StorageBreakdown({ isAdmin }) {
       .slice(0, 10);
   } else {
     data = (users.data || [])
-      .filter((u) => (u.used_bytes || 0) > 0)
-      .map((u) => ({
+      .filter(u => (u.used_bytes || 0) > 0)
+      .map(u => ({
         name: truncate(u.username),
         fullName: u.username,
         size: u.used_bytes || 0,
@@ -89,6 +87,8 @@ export default function StorageBreakdown({ isAdmin }) {
       .slice(0, 10);
   }
 
+  const total = data.reduce((s, d) => s + d.size, 0);
+
   const heading = isAdmin
     ? mode === "buckets"
       ? "Top Buckets by Size"
@@ -96,11 +96,20 @@ export default function StorageBreakdown({ isAdmin }) {
     : "Your Top Buckets";
 
   return (
-    <section className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="m-0 text-lg text-gray-800 font-semibold">{heading}</h2>
+    <section className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+      <div className="flex items-start justify-between mb-4 gap-4 flex-wrap">
+        <div className="min-w-0">
+          <h2 className="m-0 text-base text-gray-900 font-semibold">{heading}</h2>
+          <p className="m-0 text-xs text-gray-400 mt-0.5">
+            {data.length > 0
+              ? `${formatBytes(total)} across ${data.length} ${
+                  mode === "users" ? "users" : "buckets"
+                }`
+              : "—"}
+          </p>
+        </div>
         {isAdmin && (
-          <div className="inline-flex rounded-md border border-gray-200 overflow-hidden text-xs">
+          <div className="inline-flex rounded-md border border-gray-200 overflow-hidden text-xs shrink-0">
             <button
               onClick={() => setMode("buckets")}
               className={`px-3 py-1.5 ${
@@ -126,36 +135,62 @@ export default function StorageBreakdown({ isAdmin }) {
       </div>
 
       {data.length === 0 ? (
-        <div className="text-sm text-gray-400 italic py-12 text-center">
+        <div className="text-sm text-gray-400 italic py-16 text-center">
           No usage data yet.
         </div>
       ) : (
-        <div style={{ width: "100%", height: Math.max(220, data.length * 32 + 40) }}>
+        <div style={{ width: "100%", height: Math.max(220, data.length * 34 + 40) }}>
           <ResponsiveContainer>
             <BarChart
               data={data}
               layout="vertical"
-              margin={{ top: 4, right: 24, bottom: 4, left: 8 }}
+              margin={{ top: 4, right: 80, bottom: 4, left: 4 }}
             >
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f3f4f6" />
+              <defs>
+                <linearGradient id="barAccent" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor={ACCENT} stopOpacity={1} />
+                  <stop offset="100%" stopColor={ACCENT} stopOpacity={0.85} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid
+                strokeDasharray="2 4"
+                horizontal={false}
+                stroke="#f1f5f9"
+              />
               <XAxis
                 type="number"
-                tickFormatter={(v) => formatBytes(v)}
-                stroke="#9ca3af"
-                fontSize={11}
+                tickFormatter={v => formatBytes(v)}
+                stroke="#cbd5e1"
+                fontSize={10}
+                tickLine={false}
+                axisLine={false}
               />
               <YAxis
                 type="category"
                 dataKey="name"
-                stroke="#6b7280"
+                stroke="#475569"
                 fontSize={12}
                 width={140}
+                tickLine={false}
+                axisLine={false}
               />
-              <Tooltip content={<TipBytes />} cursor={{ fill: "#f9fafb" }} />
-              <Bar dataKey="size" radius={[0, 4, 4, 0]}>
+              <Tooltip
+                content={<TipBytes total={total} />}
+                cursor={{ fill: "#f8fafc" }}
+              />
+              <Bar dataKey="size" radius={[0, 6, 6, 0]} barSize={18}>
                 {data.map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  // Top 3 in the deep accent, rest in the lighter tint.
+                  // Length still carries the comparison; the tint just
+                  // de-emphasises the long tail without going monochrome.
+                  <Cell key={i} fill={i < 3 ? "url(#barAccent)" : ACCENT_TINT} />
                 ))}
+                <LabelList
+                  dataKey="size"
+                  position="right"
+                  formatter={v => formatBytes(v)}
+                  style={{ fontSize: 11, fill: "#475569", fontWeight: 500 }}
+                />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
