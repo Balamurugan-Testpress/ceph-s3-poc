@@ -357,14 +357,17 @@ async def list_ceph_rgw_users(
         # Normalise: ensure we only process dicts (Admin Ops may return strings)
         users = [u for u in raw_users if isinstance(u, dict)]
 
-        # Find which RGW UIDs have already been imported into the app DB
-        imported_uids = set()
+        # Find which RGW UIDs have already been imported into the app DB.
+        # The virtual admin (env-var-backed, no DB row) maps to the Ceph
+        # "admin" RGW user — exclude it explicitly so it doesn't show up
+        # as importable alongside the dashboard's admin login.
+        imported_uids = {"admin"}
         try:
             stmt = select(User.rgw_user_id).where(
                 User.rgw_user_id.isnot(None)
             )
             result = await db.execute(stmt)
-            imported_uids = {row[0] for row in result if row[0]}
+            imported_uids.update(row[0] for row in result if row[0])
         except Exception:
             pass  # Non-fatal — just show all users
 
@@ -487,12 +490,13 @@ async def import_all_rgw_users(
 
     users = [u for u in raw_users if isinstance(u, dict)]
 
-    # Find already-imported UIDs
-    imported_uids = set()
+    # Find already-imported UIDs. The virtual admin (env-var-backed) owns
+    # the Ceph "admin" RGW user, so always exclude it from bulk import.
+    imported_uids = {"admin"}
     try:
         stmt = select(User.rgw_user_id).where(User.rgw_user_id.isnot(None))
         result = await db.execute(stmt)
-        imported_uids = {row[0] for row in result if row[0]}
+        imported_uids.update(row[0] for row in result if row[0])
     except Exception:
         pass
 
@@ -608,10 +612,13 @@ async def resync_rgw_user(
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
-    """Re-create the Ceph RGW user and update stored credentials.
+    """Refresh the user's S3 credentials, recreating the RGW user if missing.
 
-    Use this when a tenant user's RGW user was lost (e.g. RGW data reset)
-    and they get ``InvalidAccessKeyId`` errors on S3 operations.
+    Two scenarios this handles:
+      1. RGW user still exists (common case) — just mint a fresh key pair
+         via the Admin Ops API; calling create_rgw_user here would 409
+         with UserAlreadyExists.
+      2. RGW user was wiped from Ceph (data reset) — recreate it.
     """
     # ── Admin user (virtual, no RGW user to resync) ──
     if user_id == "admin":
@@ -629,25 +636,67 @@ async def resync_rgw_user(
             detail="User has no RGW user ID — they may need to be re-created",
         )
 
+    # Check if the RGW user is still in Ceph.
     try:
-        rgw_resp = await create_rgw_user(
-            uid=user.rgw_user_id,
-            display_name=user.display_name or user.username,
-        )
+        existing_rgw = await get_rgw_user(user.rgw_user_id)
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to recreate RGW user in Ceph: {exc}",
+            detail=f"Failed to query RGW for user '{user.rgw_user_id}': {exc}",
         )
 
-    keys = extract_rgw_keys(rgw_resp)
-    if not keys:
-        raise HTTPException(
-            status_code=502,
-            detail="RGW user created but Ceph returned no keys",
-        )
+    access_key: str
+    secret_key: str
 
-    access_key, secret_key = keys
+    if existing_rgw:
+        # User exists — generate a fresh key pair via Admin Ops.
+        try:
+            from app.services.rgw_admin_ops import RGWAdminOpsClient
+
+            keys_list = await RGWAdminOpsClient().create_key(user.rgw_user_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to generate new keys for RGW user: {exc}",
+            )
+
+        # The Admin Ops create-key response returns all keys for the user; pick
+        # the one we just created (the most recent / last entry is the new one
+        # on every Ceph version we've tested).
+        new_key = next(
+            (k for k in reversed(keys_list) if k.get("access_key") and k.get("secret_key")),
+            None,
+        )
+        if not new_key:
+            raise HTTPException(
+                status_code=502,
+                detail="RGW returned no keys after generation",
+            )
+        access_key = new_key["access_key"]
+        secret_key = new_key["secret_key"]
+        message = f"Generated fresh credentials for RGW user '{user.rgw_user_id}'"
+    else:
+        # User doesn't exist in RGW — recreate it.
+        try:
+            rgw_resp = await create_rgw_user(
+                uid=user.rgw_user_id,
+                display_name=user.display_name or user.username,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to recreate RGW user in Ceph: {exc}",
+            )
+
+        keys = extract_rgw_keys(rgw_resp)
+        if not keys:
+            raise HTTPException(
+                status_code=502,
+                detail="RGW user created but Ceph returned no keys",
+            )
+        access_key, secret_key = keys
+        message = f"RGW user '{user.rgw_user_id}' recreated with new credentials"
+
     updated = await update_rgw_creds(db, uid, user.rgw_user_id, access_key, secret_key)
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update stored credentials")
@@ -660,7 +709,7 @@ async def resync_rgw_user(
     )
 
     return {
-        "message": f"RGW user '{user.rgw_user_id}' recreated with new credentials",
+        "message": message,
         "rgw_access_key": access_key,
         "rgw_secret_key": secret_key,
     }
