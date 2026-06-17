@@ -253,3 +253,37 @@ class RGWAdminOpsClient:
         except RGWAdminOpsError as exc:
             logger.warning("get_bucket(%s) failed: %s", bucket_name, exc)
             return None
+
+    # ── Rate limit ────────────────────────────────────────────────
+
+    async def set_bucket_rate_limit(
+        self,
+        bucket: str,
+        *,
+        enabled: bool,
+        max_read_ops: int = 0,
+        max_write_ops: int = 0,
+        max_read_bytes: int = 0,
+        max_write_bytes: int = 0,
+    ) -> dict:
+        """Apply a per-bucket rate limit via RGW Admin Ops.
+
+        Gotcha worth flagging: rate limit uses **POST**, not PUT. Quota
+        uses PUT — they look symmetrical but the verbs differ. Caller
+        creds must hold the ``ratelimit=write`` admin cap; regular S3
+        keys get 403.
+
+        0 on any dimension means "no limit" for that metric.
+        """
+        params = {
+            "ratelimit-scope": "bucket",
+            "bucket": bucket,
+            "enabled": "True" if enabled else "False",
+            "max-read-ops": str(max_read_ops),
+            "max-write-ops": str(max_write_ops),
+            "max-read-bytes": str(max_read_bytes),
+            "max-write-bytes": str(max_write_bytes),
+            "format": "json",
+        }
+        data = await self._request("POST", "/admin/ratelimit", params)
+        return data if isinstance(data, dict) else {"ok": True}

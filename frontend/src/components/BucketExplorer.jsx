@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
 import { useUploads } from "../context/UploadsContext";
 import { formatBytes, formatCompact } from "../utils/format";
+import CreateBucketModal from "./CreateBucketModal";
 
 function Notification({ type, message, onDismiss }) {
   const bg = type === "error" ? "bg-red-100 text-red-800" :
@@ -228,9 +229,7 @@ function BucketExplorer() {
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const [bucketSort, setBucketSort] = useState("name");
-  const [showCreateInput, setShowCreateInput] = useState(false);
-  const [newBucketName, setNewBucketName] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null); // { type: 'bucket'|'object', data }
   const [shareTarget, setShareTarget] = useState(null); // { bucket, key } when share modal open
 
@@ -370,26 +369,6 @@ function BucketExplorer() {
       addNotification("error", `Failed to load all objects: ${err.message}`);
     }
     setLoadingObjects(false);
-  }
-
-  // ── Create bucket ──
-  async function handleCreateBucket() {
-    const name = newBucketName.trim();
-    if (!name) return;
-    setCreating(true);
-    try {
-      await apiFetch("/api/s3/buckets", {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      });
-      addNotification("success", `Bucket "${name}" created`);
-      setNewBucketName("");
-      setShowCreateInput(false);
-      await fetchBuckets();
-    } catch (err) {
-      addNotification("error", `Failed to create bucket: ${err.message}`);
-    }
-    setCreating(false);
   }
 
   // ── Delete bucket ──
@@ -640,7 +619,7 @@ function BucketExplorer() {
                 ↻
               </button>
               <button
-                onClick={() => { setShowCreateInput(!showCreateInput); setNewBucketName(""); }}
+                onClick={() => setShowCreateModal(true)}
                 title="Create bucket"
                 className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
               >
@@ -648,28 +627,6 @@ function BucketExplorer() {
               </button>
             </div>
           </div>
-
-          {showCreateInput && (
-            <div className="flex gap-1 mb-2">
-              <input
-                type="text"
-                value={newBucketName}
-                onChange={e => setNewBucketName(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleCreateBucket()}
-                placeholder="bucket-name"
-                className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded"
-                autoFocus
-                disabled={creating}
-              />
-              <button
-                onClick={handleCreateBucket}
-                disabled={creating || !newBucketName.trim()}
-                className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-60"
-              >
-                {creating ? "..." : "OK"}
-              </button>
-            </div>
-          )}
 
           {/* Bucket sort controls */}
           <div className="flex gap-1 mb-2 text-xs text-gray-400">
@@ -1056,6 +1013,11 @@ function BucketExplorer() {
           addNotification={addNotification}
         />
       )}
+      <CreateBucketModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        addNotification={addNotification}
+      />
     </div>
   );
 }

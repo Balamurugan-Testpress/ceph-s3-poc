@@ -58,11 +58,130 @@ class RGWClient:
         buckets.sort(key=lambda x: x["creation_date"], reverse=True)
         return buckets
 
-    def create_bucket(self, name: str) -> dict:
-        """Create a new S3 bucket."""
+    def create_bucket(
+        self,
+        name: str,
+        *,
+        acl: str | None = None,
+        object_lock_enabled: bool = False,
+    ) -> dict:
+        """Create a new S3 bucket.
+
+        Object Lock **must** be opted into at create time — Ceph rejects
+        PutObjectLockConfiguration with HTTP 409 ``InvalidBucketState``
+        otherwise. The canned ACL is forwarded the same way; we prefer
+        setting it here over a follow-up ``put_bucket_acl`` to keep the
+        bucket in its target state immediately.
+
+        Tentacle (dev-branch RGW) workaround: this build emits a verbose
+        JSON body on CreateBucket that boto3 cannot parse, so boto3
+        raises ``Internal Server Error`` (Code=500) even though the
+        bucket was actually created. We swallow that specific failure
+        if ``head_bucket`` confirms the bucket exists — otherwise the
+        wizard would 502 and every follow-up setting (lock retention,
+        tags, policy, etc.) would be skipped. Real failures (NoSuchKey,
+        BucketAlreadyOwnedByYou, AccessDenied, …) still propagate.
+        """
+        kwargs: dict = {"Bucket": name}
+        if acl:
+            kwargs["ACL"] = acl
+        if object_lock_enabled:
+            kwargs["ObjectLockEnabledForBucket"] = True
+        client = self._get_client()
         try:
-            self._get_client().create_bucket(Bucket=name)
+            client.create_bucket(**kwargs)
             return {"name": name, "created": True}
+        except Exception as exc:
+            # Spurious 500 from the tentacle RGW: bucket actually exists.
+            if "Internal Server Error" in str(exc) or "(500)" in str(exc):
+                try:
+                    client.head_bucket(Bucket=name)
+                except Exception:
+                    raise RGWError(str(exc)) from exc
+                return {"name": name, "created": True, "rgw_quirk_500": True}
+            raise RGWError(str(exc)) from exc
+
+    def put_bucket_versioning(self, bucket: str, status: str) -> dict:
+        """Set versioning to ``Enabled`` or ``Suspended``.
+
+        There is no "Disabled" — that's the implicit state of a bucket
+        that has never had versioning set.
+        """
+        if status not in ("Enabled", "Suspended"):
+            raise RGWError(f"versioning status must be Enabled or Suspended, got {status!r}")
+        try:
+            self._get_client().put_bucket_versioning(
+                Bucket=bucket,
+                VersioningConfiguration={"Status": status},
+            )
+            return {"bucket": bucket, "versioning": status}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def put_object_lock_configuration(
+        self,
+        bucket: str,
+        mode: str,
+        *,
+        days: int | None = None,
+        years: int | None = None,
+    ) -> dict:
+        """Apply the default retention rule for a lock-enabled bucket.
+
+        ``days`` and ``years`` are mutually exclusive — RGW returns
+        ``MalformedXML`` otherwise. The bucket must already have been
+        created with ``ObjectLockEnabledForBucket=True``.
+        """
+        if (days is None) == (years is None):
+            raise RGWError("Provide exactly one of days or years")
+        if mode not in ("GOVERNANCE", "COMPLIANCE"):
+            raise RGWError(f"object-lock mode must be GOVERNANCE or COMPLIANCE, got {mode!r}")
+        retention: dict = {"Mode": mode}
+        if days is not None:
+            retention["Days"] = days
+        else:
+            retention["Years"] = years
+        try:
+            self._get_client().put_object_lock_configuration(
+                Bucket=bucket,
+                ObjectLockConfiguration={
+                    "ObjectLockEnabled": "Enabled",
+                    "Rule": {"DefaultRetention": retention},
+                },
+            )
+            return {"bucket": bucket, "object_lock": {"mode": mode, **retention}}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def put_bucket_tagging(self, bucket: str, tags: list[dict]) -> dict:
+        """Set the TagSet on a bucket. ``tags`` is ``[{Key, Value}, ...]``.
+
+        Note: boto3's ``create_bucket`` accepts a ``Tags`` field on
+        ``CreateBucketConfiguration``, but it is AWS-only — RGW ignores
+        it. Always issue this separately.
+        """
+        try:
+            self._get_client().put_bucket_tagging(
+                Bucket=bucket,
+                Tagging={"TagSet": tags},
+            )
+            return {"bucket": bucket, "tagging_set": True}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def put_bucket_acl(self, bucket: str, canned_acl: str) -> dict:
+        """Apply a canned ACL post-create.
+
+        RGW supports exactly four canned values; anything else returns
+        InvalidArgument. Prefer ``create_bucket(acl=...)`` when possible
+        so the bucket is born in its target state.
+        """
+        ALLOWED = {"private", "public-read", "public-read-write", "authenticated-read"}
+        if canned_acl not in ALLOWED:
+            raise RGWError(f"unsupported canned ACL {canned_acl!r}")
+        try:
+            self._get_client().put_bucket_acl(Bucket=bucket, ACL=canned_acl)
+            return {"bucket": bucket, "acl": canned_acl}
         except Exception as exc:
             raise RGWError(str(exc)) from exc
 

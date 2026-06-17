@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ── Request schemas ──
@@ -30,8 +31,76 @@ class CreateUserRequest(BaseModel):
     rate_limit_max_write_bytes: int = 0
 
 
+class ObjectLockSettings(BaseModel):
+    """Default retention applied to new objects in a lock-enabled bucket.
+
+    `retention_days` and `retention_years` are mutually exclusive — RGW
+    returns `MalformedXML` if both/neither is set on the underlying
+    PutObjectLockConfiguration call.
+    """
+
+    mode: Literal["GOVERNANCE", "COMPLIANCE"]
+    retention_days: int | None = Field(default=None, ge=1)
+    retention_years: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _exactly_one_retention(self) -> "ObjectLockSettings":
+        if (self.retention_days is None) == (self.retention_years is None):
+            raise ValueError(
+                "Provide exactly one of retention_days or retention_years"
+            )
+        return self
+
+
+class BucketTag(BaseModel):
+    key: str = Field(..., min_length=1, max_length=128)
+    value: str = Field(default="", max_length=256)
+
+
+class BucketRateLimitSettings(BaseModel):
+    """Per-bucket rate limit. Requires admin caps to apply.
+
+    0 means "no limit" for that dimension — matches the RGW Admin Ops
+    convention.
+    """
+
+    enabled: bool = True
+    max_read_ops: int = Field(default=0, ge=0)
+    max_write_ops: int = Field(default=0, ge=0)
+    max_read_bytes: int = Field(default=0, ge=0)
+    max_write_bytes: int = Field(default=0, ge=0)
+
+
 class CreateBucketRequest(BaseModel):
+    """Create-bucket request with all the optional sub-settings the wizard
+    can pass. Each block is independently applied after the bucket exists;
+    failures are reported back in `failed[]` rather than rolled back.
+    """
+
     name: str = Field(..., min_length=3, max_length=255)
+
+    # S3-side settings (applied with the caller's S3 creds)
+    versioning_enabled: bool = False
+    object_lock_enabled: bool = False  # MUST be set at create time per Ceph
+    object_lock: ObjectLockSettings | None = None  # default retention
+    tags: list[BucketTag] = Field(default_factory=list)
+    policy: str | None = None  # raw JSON string; None = skip
+    acl: (
+        Literal["private", "public-read", "public-read-write", "authenticated-read"]
+        | None
+    ) = None
+
+    # Admin-ops side (admin caps required — rejected for tenants at the route)
+    rate_limit: BucketRateLimitSettings | None = None
+
+    @model_validator(mode="after")
+    def _lock_consistency(self) -> "CreateBucketRequest":
+        # Default retention only makes sense when lock is enabled at create.
+        if self.object_lock is not None and not self.object_lock_enabled:
+            raise ValueError(
+                "object_lock retention requires object_lock_enabled=True"
+            )
+        return self
 
 
 class LoginRequest(BaseModel):
