@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +18,7 @@ from app.api.rgw import _get_user_client
 from app.config import settings
 from app.db import get_db
 from app.db.models import AuditLog
-from app.db.schemas import CreateBucketRequest
+from app.db.schemas import BucketRateLimitSettings, BucketTag, CreateBucketRequest
 from app.services.rgw_admin_ops import RGWAdminOpsClient, RGWAdminOpsError
 from app.services.rgw_client import RGWError
 from app.services.user_service import recalculate_usage, update_used_bytes
@@ -290,7 +292,6 @@ async def get_bucket_policy(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-from pydantic import BaseModel
 class PutPolicyRequest(BaseModel):
     policy: str
 
@@ -319,6 +320,249 @@ async def delete_bucket_policy(
         result = client.delete_bucket_policy(bucket)
         return result
     except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+# ── Bucket property GET/PUT ──────────────────────────────────────
+#
+# One pair per property surfaced in the Settings & Policy tab. Reads are
+# best-effort — a property that the bucket never had set should come
+# back as a clean "empty" state, not a 502, so the UI can render
+# uniformly. Writes audit-log on success.
+
+
+class PutVersioningRequest(BaseModel):
+    # S3 has no "Disabled" — once a bucket has had versioning enabled,
+    # the only off-switch is Suspended (existing versions remain).
+    status: Literal["Enabled", "Suspended"]
+
+
+@router.get("/buckets/{bucket}/versioning")
+async def get_bucket_versioning(
+    bucket: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        client = _get_user_client(current_user)
+        return client.get_bucket_versioning(bucket)
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.put("/buckets/{bucket}/versioning")
+async def put_bucket_versioning(
+    bucket: str,
+    data: PutVersioningRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        client = _get_user_client(current_user)
+        result = client.put_bucket_versioning(bucket, data.status)
+        await log_action(
+            db, current_user, "SET_BUCKET_VERSIONING",
+            {"bucket": bucket, "status": data.status},
+        )
+        return result
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+class PutObjectLockRequest(BaseModel):
+    """Default retention update. The lock *enable* flag is fixed at
+    create time and cannot change here.
+    """
+
+    mode: Literal["GOVERNANCE", "COMPLIANCE"]
+    retention_days: int | None = Field(default=None, ge=1)
+    retention_years: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "PutObjectLockRequest":
+        if (self.retention_days is None) == (self.retention_years is None):
+            raise ValueError("Provide exactly one of retention_days or retention_years")
+        return self
+
+
+@router.get("/buckets/{bucket}/object-lock")
+async def get_bucket_object_lock(
+    bucket: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        client = _get_user_client(current_user)
+        # None ⇒ bucket was created without Object Lock; the UI uses
+        # that to gate the entire section (lock can't be added later).
+        conf = client.get_object_lock_configuration(bucket)
+        return {"configuration": conf}
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.put("/buckets/{bucket}/object-lock")
+async def put_bucket_object_lock(
+    bucket: str,
+    data: PutObjectLockRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        client = _get_user_client(current_user)
+        result = client.put_object_lock_configuration(
+            bucket,
+            data.mode,
+            days=data.retention_days,
+            years=data.retention_years,
+        )
+        await log_action(
+            db, current_user, "SET_BUCKET_OBJECT_LOCK",
+            {
+                "bucket": bucket,
+                "mode": data.mode,
+                "days": data.retention_days,
+                "years": data.retention_years,
+            },
+        )
+        return result
+    except RGWError as exc:
+        # 409 InvalidBucketState here means lock wasn't enabled at create —
+        # surface that as 422 so the UI can show "lock not enabled" cleanly.
+        if "InvalidBucketState" in str(exc):
+            raise HTTPException(
+                status_code=422,
+                detail="Object Lock is not enabled on this bucket. It must be enabled at create time.",
+            ) from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+class PutTagsRequest(BaseModel):
+    tags: list[BucketTag] = Field(default_factory=list)
+
+
+@router.get("/buckets/{bucket}/tagging")
+async def get_bucket_tagging(
+    bucket: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        client = _get_user_client(current_user)
+        return {"tags": client.get_bucket_tagging(bucket)}
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.put("/buckets/{bucket}/tagging")
+async def put_bucket_tagging(
+    bucket: str,
+    data: PutTagsRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the bucket's full TagSet. Empty list clears all tags."""
+    try:
+        client = _get_user_client(current_user)
+        if not data.tags:
+            result = client.delete_bucket_tagging(bucket)
+        else:
+            result = client.put_bucket_tagging(
+                bucket,
+                [{"Key": t.key, "Value": t.value} for t in data.tags],
+            )
+        await log_action(
+            db, current_user, "SET_BUCKET_TAGGING",
+            {"bucket": bucket, "tags": [t.key for t in data.tags]},
+        )
+        return result
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+class PutAclRequest(BaseModel):
+    acl: Literal["private", "public-read", "public-read-write", "authenticated-read"]
+
+
+@router.get("/buckets/{bucket}/acl")
+async def get_bucket_acl(
+    bucket: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        client = _get_user_client(current_user)
+        return client.get_bucket_acl(bucket)
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.put("/buckets/{bucket}/acl")
+async def put_bucket_acl(
+    bucket: str,
+    data: PutAclRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        client = _get_user_client(current_user)
+        result = client.put_bucket_acl(bucket, data.acl)
+        await log_action(
+            db, current_user, "SET_BUCKET_ACL",
+            {"bucket": bucket, "acl": data.acl},
+        )
+        return result
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/buckets/{bucket}/cors")
+async def get_bucket_cors(
+    bucket: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        client = _get_user_client(current_user)
+        return {"rules": client.get_bucket_cors(bucket)}
+    except RGWError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/buckets/{bucket}/rate-limit")
+async def get_bucket_rate_limit(
+    bucket: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Admin-only — RGW Admin Ops needs the ``ratelimit=read`` cap."""
+    is_admin = current_user.get("id") == "admin" or current_user.get("role") == "admin"
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Admin only.")
+    admin_ops = RGWAdminOpsClient()
+    return {"rate_limit": await admin_ops.get_bucket_rate_limit(bucket)}
+
+
+@router.put("/buckets/{bucket}/rate-limit")
+async def put_bucket_rate_limit(
+    bucket: str,
+    data: BucketRateLimitSettings,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    is_admin = current_user.get("id") == "admin" or current_user.get("role") == "admin"
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Admin only.")
+    try:
+        admin_ops = RGWAdminOpsClient()
+        result = await admin_ops.set_bucket_rate_limit(
+            bucket,
+            enabled=data.enabled,
+            max_read_ops=data.max_read_ops,
+            max_write_ops=data.max_write_ops,
+            max_read_bytes=data.max_read_bytes,
+            max_write_bytes=data.max_write_bytes,
+        )
+        await log_action(
+            db, current_user, "SET_BUCKET_RATE_LIMIT",
+            {"bucket": bucket, "enabled": data.enabled},
+        )
+        return result
+    except RGWAdminOpsError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 

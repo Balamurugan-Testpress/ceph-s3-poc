@@ -256,6 +256,26 @@ class RGWAdminOpsClient:
 
     # ── Rate limit ────────────────────────────────────────────────
 
+    async def get_bucket_rate_limit(self, bucket: str) -> dict | None:
+        """Fetch the per-bucket rate-limit configuration. Returns the
+        ``bucket_ratelimit`` sub-dict or None if RGW reports no entry.
+        Requires the ``ratelimit=read`` admin cap.
+        """
+        try:
+            data = await self._request(
+                "GET",
+                "/admin/ratelimit",
+                {"ratelimit-scope": "bucket", "bucket": bucket, "format": "json"},
+            )
+            if isinstance(data, dict):
+                # Newer Ceph returns {bucket_ratelimit: {...}}; older returns the
+                # config dict directly. Normalise both.
+                return data.get("bucket_ratelimit", data)
+            return None
+        except RGWAdminOpsError as exc:
+            logger.warning("get_bucket_rate_limit(%s) failed: %s", bucket, exc)
+            return None
+
     async def set_bucket_rate_limit(
         self,
         bucket: str,

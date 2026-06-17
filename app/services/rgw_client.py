@@ -169,6 +169,80 @@ class RGWClient:
         except Exception as exc:
             raise RGWError(str(exc)) from exc
 
+    def get_bucket_versioning(self, bucket: str) -> dict:
+        """Return ``{status, mfa_delete}``. A bucket that's never had
+        versioning set has no Status field — we surface that as
+        ``status=None`` so the UI can show "Unversioned" cleanly.
+        """
+        try:
+            resp = self._get_client().get_bucket_versioning(Bucket=bucket)
+            return {
+                "status": resp.get("Status"),
+                "mfa_delete": resp.get("MFADelete"),
+            }
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def get_object_lock_configuration(self, bucket: str) -> dict | None:
+        """Return the lock config, or None if the bucket was created
+        without Object Lock. Distinguish between "lock not enabled" and
+        "lock enabled, no default retention" — both are valid states
+        and only the second can have its retention modified.
+        """
+        try:
+            resp = self._get_client().get_object_lock_configuration(Bucket=bucket)
+            return resp.get("ObjectLockConfiguration")
+        except Exception as exc:
+            # ObjectLockConfigurationNotFoundError → bucket exists but lock not enabled.
+            msg = str(exc)
+            if "ObjectLockConfigurationNotFoundError" in msg or "NotFoundError" in msg:
+                return None
+            raise RGWError(msg) from exc
+
+    def get_bucket_tagging(self, bucket: str) -> list[dict]:
+        """Return the TagSet as ``[{Key, Value}, ...]``, or [] if unset."""
+        try:
+            resp = self._get_client().get_bucket_tagging(Bucket=bucket)
+            return resp.get("TagSet", [])
+        except Exception as exc:
+            if "NoSuchTagSet" in str(exc):
+                return []
+            raise RGWError(str(exc)) from exc
+
+    def delete_bucket_tagging(self, bucket: str) -> dict:
+        try:
+            self._get_client().delete_bucket_tagging(Bucket=bucket)
+            return {"bucket": bucket, "tagging_cleared": True}
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def get_bucket_acl(self, bucket: str) -> dict:
+        """Return ``{owner, grants}`` — caller-friendly subset of the boto3
+        response. Grants come back verbatim so the UI can show whichever
+        grantees the bucket has (group URIs, canonical IDs, …).
+        """
+        try:
+            resp = self._get_client().get_bucket_acl(Bucket=bucket)
+            return {
+                "owner": resp.get("Owner", {}),
+                "grants": resp.get("Grants", []),
+            }
+        except Exception as exc:
+            raise RGWError(str(exc)) from exc
+
+    def get_bucket_cors(self, bucket: str) -> list[dict]:
+        """Return the CORS rules list, or [] if none. CORS-not-found is
+        the common case (we only install one rule on create), not an
+        error worth surfacing.
+        """
+        try:
+            resp = self._get_client().get_bucket_cors(Bucket=bucket)
+            return resp.get("CORSRules", [])
+        except Exception as exc:
+            if "NoSuchCORSConfiguration" in str(exc):
+                return []
+            raise RGWError(str(exc)) from exc
+
     def put_bucket_acl(self, bucket: str, canned_acl: str) -> dict:
         """Apply a canned ACL post-create.
 

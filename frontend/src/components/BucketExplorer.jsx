@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
 import { useUploads } from "../context/UploadsContext";
 import { formatBytes, formatCompact } from "../utils/format";
 import CreateBucketModal from "./CreateBucketModal";
+import BucketSettingsPanel from "./BucketSettingsPanel";
 
 function Notification({ type, message, onDismiss }) {
   const bg = type === "error" ? "bg-red-100 text-red-800" :
@@ -217,8 +218,6 @@ function BucketExplorer() {
   const [selected, setSelected] = useState(null);
   const [dragOver, setDragOver] = useState(false);
   const [bucketTab, setBucketTab] = useState("objects"); // "objects" or "settings"
-  const [policyText, setPolicyText] = useState("");
-  const [accessLevel, setAccessLevel] = useState("private"); // "private", "public", "custom"
   const [objects, setObjects] = useState([]);
   const [objectInfo, setObjectInfo] = useState(null);
   const [loadingObjects, setLoadingObjects] = useState(false);
@@ -252,86 +251,6 @@ function BucketExplorer() {
     queryFn: () => apiFetch("/api/s3/usage"),
     staleTime: 60000,
   });
-
-  const { data: policyData, isLoading: loadingPolicy } = useQuery({
-    queryKey: ["bucketPolicy", selected],
-    queryFn: () => apiFetch(`/api/s3/buckets/${selected}/policy`),
-    enabled: !!selected && bucketTab === "settings",
-  });
-
-  const putPolicyMutation = useMutation({
-    mutationFn: (policy) => apiFetch(`/api/s3/buckets/${selected}/policy`, {
-      method: "PUT",
-      body: JSON.stringify({ policy }),
-    }),
-    onSuccess: () => {
-      addNotification("success", "Bucket policy updated");
-      queryClient.invalidateQueries(["bucketPolicy", selected]);
-    },
-    onError: (err) => addNotification("error", err.message),
-  });
-
-  const deletePolicyMutation = useMutation({
-    mutationFn: () => apiFetch(`/api/s3/buckets/${selected}/policy`, { method: "DELETE" }),
-    onSuccess: () => {
-      addNotification("success", "Bucket policy removed");
-      setPolicyText("");
-      queryClient.invalidateQueries(["bucketPolicy", selected]);
-    },
-    onError: (err) => addNotification("error", err.message),
-  });
-
-  // Keep policyText in sync with loaded data
-  useEffect(() => {
-    if (policyData?.policy !== undefined) {
-      const p = policyData.policy;
-      setPolicyText(p || "");
-      if (!p) {
-        setAccessLevel("private");
-      } else {
-        try {
-          const parsed = JSON.parse(p);
-          const isPublic = parsed.Statement?.some(s => 
-            s.Effect === "Allow" && 
-            s.Principal === "*" && 
-            (s.Action === "s3:GetObject" || (Array.isArray(s.Action) && s.Action.includes("s3:GetObject")))
-          );
-          setAccessLevel(isPublic ? "public" : "custom");
-        } catch {
-          setAccessLevel("custom");
-        }
-      }
-    }
-  }, [policyData]);
-
-  const getPublicPolicy = (bucketName) => {
-    return JSON.stringify({
-      Version: "2012-10-17",
-      Statement: [
-        {
-          Effect: "Allow",
-          Principal: "*",
-          Action: ["s3:GetObject"],
-          Resource: [`arn:aws:s3:::${bucketName}/*`]
-        }
-      ]
-    }, null, 2);
-  };
-
-  const handleAccessChange = (level) => {
-    if (level === accessLevel) return;
-    setAccessLevel(level);
-    if (level === "public") {
-      const p = getPublicPolicy(selected);
-      setPolicyText(p);
-      putPolicyMutation.mutate(p);
-    } else if (level === "private") {
-      setPolicyText("");
-      if (policyData?.policy) {
-        deletePolicyMutation.mutate();
-      }
-    }
-  };
 
   // ── Open bucket ──
   async function openBucket(name) {
@@ -900,80 +819,7 @@ function BucketExplorer() {
               )}
                 </>
               ) : (
-                <div className="space-y-4 max-w-3xl">
-                  <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                    <h3 className="text-sm font-semibold text-gray-800 mb-2">Access Level</h3>
-                    <p className="text-xs text-gray-500 mb-4">
-                      Control whether this bucket is completely private or accessible to everyone on the internet.
-                    </p>
-                    {loadingPolicy ? (
-                      <div className="text-sm text-gray-400 italic">Loading policy...</div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="flex gap-6">
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="accessLevel"
-                              value="private"
-                              checked={accessLevel === "private"}
-                              onChange={() => handleAccessChange("private")}
-                              className="text-brand-500 focus:ring-brand-500"
-                            />
-                            <span className="text-sm font-medium text-gray-800">Private</span>
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="accessLevel"
-                              value="public"
-                              checked={accessLevel === "public"}
-                              onChange={() => handleAccessChange("public")}
-                              className="text-brand-500 focus:ring-brand-500"
-                            />
-                            <span className="text-sm font-medium text-gray-800">Public (Read-Only)</span>
-                          </label>
-                          {accessLevel === "custom" && (
-                            <label className="flex items-center gap-2 cursor-pointer opacity-50">
-                              <input
-                                type="radio"
-                                name="accessLevel"
-                                value="custom"
-                                checked
-                                readOnly
-                                className="text-brand-500 focus:ring-brand-500"
-                              />
-                              <span className="text-sm font-medium text-gray-800">Custom Policy</span>
-                            </label>
-                          )}
-                        </div>
-
-                        {accessLevel === "custom" && (
-                          <div className="mt-4 pt-4 border-t border-gray-200">
-                            <p className="text-xs text-gray-500 mb-2 font-medium">Raw JSON Policy (Advanced)</p>
-                            <textarea
-                              value={policyText}
-                              onChange={(e) => setPolicyText(e.target.value)}
-                              className="w-full h-48 px-3 py-2 text-sm font-mono border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-400"
-                            />
-                            <div className="flex gap-2 mt-2">
-                              <button
-                                onClick={() => putPolicyMutation.mutate(policyText)}
-                                disabled={!policyText.trim() || putPolicyMutation.isLoading}
-                                className="px-3 py-1.5 text-xs bg-brand-500 text-white rounded hover:bg-brand-600 disabled:opacity-60"
-                              >
-                                {putPolicyMutation.isLoading ? "Saving..." : "Save Custom Policy"}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                        {(putPolicyMutation.isLoading || deletePolicyMutation.isLoading) && (
-                          <div className="text-xs text-brand-600 italic">Updating permissions...</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <BucketSettingsPanel bucket={selected} addNotification={addNotification} />
               )}
             </>
           )}
