@@ -25,16 +25,18 @@ router = APIRouter(prefix="/rgw", tags=["rgw"])
 ADMIN_ID = "admin"
 
 
+def _is_admin(current_user: dict) -> bool:
+    return current_user.get("role") == "admin" or current_user.get("id") == ADMIN_ID
+
+
 def _get_user_client(current_user: dict) -> RGWClient:
     """Build an RGWClient using the correct S3 keys for this user."""
     ak = current_user.get("rgw_access_key")
     sk = current_user.get("rgw_secret_key")
 
-    # Admin users don't have per-user keys — use env vars
-    if current_user["id"] == ADMIN_ID:
+    if current_user.get("id") == ADMIN_ID:
         return RGWClient()
 
-    # Tenant users must have keys stored in DB
     if not ak or not sk:
         raise HTTPException(
             status_code=403,
@@ -45,8 +47,7 @@ def _get_user_client(current_user: dict) -> RGWClient:
 
 @router.get("/buckets")
 async def list_buckets(current_user: dict = Depends(get_current_user)):
-    # Admin — list ALL buckets via RGW Admin Ops API (includes stats)
-    if current_user["id"] == ADMIN_ID:
+    if _is_admin(current_user):
         try:
             raw_buckets = await list_rgw_buckets()
             buckets = []
@@ -75,10 +76,17 @@ async def list_buckets(current_user: dict = Depends(get_current_user)):
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    # Tenant — list own buckets via S3 with size computation
     try:
         client = _get_user_client(current_user)
         raw = client.list_buckets()
+        own_uid = current_user.get("rgw_user_id")
+        if own_uid:
+            try:
+                admin_view = await list_rgw_buckets()
+                owners = {b.get("bucket", ""): b.get("owner", "") for b in admin_view}
+                raw = [b for b in raw if owners.get(b["name"], own_uid) == own_uid]
+            except Exception:
+                pass
         buckets = []
         for b in raw:
             try:
@@ -107,7 +115,7 @@ async def get_all_bucket_stats(current_user: dict = Depends(get_current_user)):
     """Return per-bucket stats (object count, total size) for all buckets.
     Only available for admin users.
     """
-    if current_user["id"] != ADMIN_ID:
+    if not _is_admin(current_user):
         # Tenant: use S3 to compute stats per bucket
         try:
             client = _get_user_client(current_user)
