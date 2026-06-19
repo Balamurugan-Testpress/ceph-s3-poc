@@ -523,7 +523,7 @@ function BucketExplorer() {
 
       <div className="flex flex-col md:flex-row gap-4 min-h-[200px]">
         {/* Sidebar */}
-        <div className="w-full md:w-72 shrink-0">
+        <div className="w-full md:w-56 shrink-0">
           <div className="flex items-center justify-between mb-2">
             <h3 className="m-0 text-sm text-gray-500 font-medium">
               Buckets
@@ -601,11 +601,6 @@ function BucketExplorer() {
                     <span className="text-xs text-gray-400 truncate">
                       {formatBytes(sizeBytes)}
                       {objCount > 0 && <> &middot; {formatCompact(objCount)} obj</>}
-                      {usage?.is_admin && b.owner && (
-                        <span className="text-gray-400" title={`Owner: ${b.owner}`}>
-                          {" "}&middot; @{b.owner}
-                        </span>
-                      )}
                     </span>
                     <div className="h-1.5 w-16 bg-gray-200 rounded-full overflow-hidden shrink-0">
                       <div
