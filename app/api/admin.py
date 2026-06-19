@@ -83,6 +83,12 @@ async def list_all_users(db: AsyncSession = Depends(get_db), admin: dict = Depen
     })
 
     for u in users:
+        # Skip DB users that alias the virtual admin (env-var-backed).
+        # The virtual admin is already added above — duplicating it would
+        # show the same user twice in the UI.
+        if u.username == settings.admin_username or u.rgw_user_id == "admin":
+            continue
+
         owner_id = u.rgw_user_id
         bucket_count = bucket_counts.get(owner_id, 0) if owner_id else 0
         used_bytes = user_usage.get(owner_id, 0) if owner_id else 0
@@ -147,6 +153,15 @@ async def create_new_user(
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
+    # The admin username is reserved for the env-var-backed virtual admin.
+    # Creating a DB user with the same name would cause a duplicate entry
+    # in the user list.
+    if data.username == settings.admin_username:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Username '{settings.admin_username}' is reserved",
+        )
+
     existing = await get_user_by_username(db, data.username)
     if existing:
         raise HTTPException(status_code=409, detail="Username already exists")
@@ -215,9 +230,9 @@ async def create_new_user(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Error setting advanced limits: {e}")
 
-    quota_mb = (data.user_quota_max_size_kb // 1024) if (data.user_quota_enabled and data.user_quota_max_size_kb > 0) else -1
+    quota_display = f"{data.user_quota_max_size_kb // 1024} MB" if (data.user_quota_enabled and data.user_quota_max_size_kb > 0) else "No limit"
     await log_action(
-        db, admin, "CREATE_USER", {"username": data.username, "quota_mb": quota_mb}
+        db, admin, "CREATE_USER", {"username": data.username, "quota_mb": quota_display}
     )
 
     return UserCreatedResponse(
@@ -456,6 +471,14 @@ async def import_rgw_user(
 
     if not rgw_user:
         raise HTTPException(status_code=404, detail=f"RGW user '{uid}' not found in Ceph")
+
+    # The admin RGW user maps to the virtual admin (env-var-backed).
+    # Importing it into the DB would create a duplicate in the user list.
+    if uid == "admin" or uid == settings.admin_username:
+        raise HTTPException(
+            status_code=400,
+            detail=f"RGW user '{uid}' is reserved for the admin account",
+        )
 
     keys = extract_rgw_keys(rgw_user)
     if not keys:
